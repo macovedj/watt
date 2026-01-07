@@ -225,14 +225,15 @@ mod runtime;
 mod types;
 mod valid;
 mod values;
+mod runtime_api;
 
 // Re-export runtime functionality for interpret.rs and internal use
-pub(crate) use binary::decode as decode_module;
-pub(crate) use interpreter::Interpreter;
-pub(crate) use runtime::{
-    alloc_func, get_export, init_store, instantiate_module, invoke_func,
-    module_imports, Extern, ExternVal, FuncAddr, HostFunc, Module, ModuleInst, Store,
+pub(crate) use runtime_api::{
+    alloc_func, decode_module, get_export, init_store, instantiate_module, invoke_func,
+    module_imports, module_exports, Extern, ExternVal, FuncAddr, Module, ModuleInst, Store,
 };
+pub(crate) use runtime::HostFunc;
+pub(crate) use interpreter::Interpreter;
 pub(crate) use values::Value;
 
 use proc_macro::TokenStream;
