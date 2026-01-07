@@ -196,7 +196,7 @@
     clippy::needless_pass_by_value
 )]
 
-extern crate proc_macro;
+extern crate rustc_proc_macro as proc_macro;
 
 // Execution module (interpreter or JIT)
 #[cfg(not(jit))]
