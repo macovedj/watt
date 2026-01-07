@@ -41,7 +41,7 @@ pub use crate::func::{func1, mem_func2};
 pub use crate::interpreter::Interpreter;
 pub use crate::runtime::{ExternVal, FuncAddr, HostFunc, ModuleInst};
 pub use crate::types::Extern;
-pub use crate::crate::values::Value;
+pub use crate::values::Value;
 
 use crate::ast;
 use crate::binary;
@@ -106,7 +106,7 @@ pub fn init_store() -> Store {
 
 /// Decode a binary module
 pub fn decode_module<R: Read + Seek>(reader: R) -> Result<ast::Module, Error> {
-    crate::binary::decode(reader).map_err(|_| Error::DecodeModuleFailed)
+    binary::decode(reader).map_err(|_| Error::DecodeModuleFailed)
 }
 
 /// Validate a module
@@ -238,8 +238,8 @@ pub fn type_func(store: &Store, funcaddr: FuncAddr) -> types::Func {
 pub fn invoke_func(
     store: &mut Store,
     funcaddr: FuncAddr,
-    args: Vec<crate::values::Value>,
-) -> Result<Vec<crate::values::Value>, Error> {
+    args: Vec<values::Value>,
+) -> Result<Vec<values::Value>, Error> {
     assert!(store.funcs.contains(funcaddr));
     let funcinst = &store.funcs[funcaddr];
     let functype = match funcinst {
@@ -415,7 +415,7 @@ pub fn grow_mem(store: &mut Store, memaddr: MemAddr, new: usize) -> Option<Error
 pub fn alloc_global(
     store: &mut Store,
     globaltype: &types::Global,
-    val: crate::values::Value,
+    val: values::Value,
 ) -> GlobalAddr {
     store.globals.alloc(&mut store.types_map, globaltype, val)
 }
@@ -434,7 +434,7 @@ pub fn type_global(store: &Store, globaladdr: GlobalAddr) -> types::Global {
 
 /// Read a global
 #[cfg(feature = "test")]
-pub fn read_global(store: &Store, globaladdr: GlobalAddr) -> crate::values::Value {
+pub fn read_global(store: &Store, globaladdr: GlobalAddr) -> values::Value {
     assert!(store.globals.contains(globaladdr));
     let gi = &store.globals[globaladdr];
     gi.value
@@ -445,7 +445,7 @@ pub fn read_global(store: &Store, globaladdr: GlobalAddr) -> crate::values::Valu
 pub fn write_global(
     store: &mut Store,
     globaladdr: GlobalAddr,
-    val: crate::values::Value,
+    val: values::Value,
 ) -> Option<Error> {
     assert!(store.globals.contains(globaladdr));
     let gi = &mut store.globals[globaladdr];
@@ -506,7 +506,7 @@ pub fn instantiate_module(
     let mut elem_offsets = Vec::new();
     for elem in &module.elems {
         let offset = match eval_const_expr(&store.globals, &imported_globals, &elem.offset) {
-            crate::values::Value::I32(c) => c as usize,
+            values::Value::I32(c) => c as usize,
             _ => unreachable!(),
         };
         elem_offsets.push(offset);
@@ -532,7 +532,7 @@ pub fn instantiate_module(
     let mut data_offsets = Vec::new();
     for data in &module.data {
         let offset = match eval_const_expr(&store.globals, &imported_globals, &data.offset) {
-            crate::values::Value::I32(c) => c as usize,
+            values::Value::I32(c) => c as usize,
             _ => unreachable!(),
         };
         data_offsets.push(offset);
@@ -575,7 +575,7 @@ fn allocate_and_init_module(
     extern_tables: Vec<TableAddr>,
     extern_memories: Vec<MemAddr>,
     extern_globals: Vec<GlobalAddr>,
-    vals: Vec<crate::values::Value>,
+    vals: Vec<values::Value>,
     elem_offsets: Vec<usize>,
     data_offsets: Vec<usize>,
 ) -> Result<Rc<ModuleInst>, Error> {
@@ -640,10 +640,10 @@ fn allocate_and_init_module(
     // init exports
     for export in module.exports {
         let extern_val = match export.desc {
-            crate::ast::ExportDesc::Func(idx) => ExternVal::Func(inst.func_addrs[idx as usize]),
-            crate::ast::ExportDesc::Table(idx) => ExternVal::Table(inst.table_addrs[idx as usize]),
-            crate::ast::ExportDesc::Memory(idx) => ExternVal::Memory(inst.mem_addrs[idx as usize]),
-            crate::ast::ExportDesc::Global(idx) => ExternVal::Global(inst.global_addrs[idx as usize]),
+            ast::ExportDesc::Func(idx) => ExternVal::Func(inst.func_addrs[idx as usize]),
+            ast::ExportDesc::Table(idx) => ExternVal::Table(inst.table_addrs[idx as usize]),
+            ast::ExportDesc::Memory(idx) => ExternVal::Memory(inst.mem_addrs[idx as usize]),
+            ast::ExportDesc::Global(idx) => ExternVal::Global(inst.global_addrs[idx as usize]),
         };
         inst.exports.push(ExportInst {
             name: export.name,
