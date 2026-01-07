@@ -18,11 +18,12 @@ keywords = ["macros", "wasm"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/dtolnay/watt"
 
-[workspace]
-members = ["demo/caller", "demo/wa", "proc-macro", "runtime/tests"]
+# Workspace disabled for rustc submodule compatibility
+# [workspace]
+# members = ["demo/caller", "demo/wa", "proc-macro", "runtime/tests"]
 
-[patch.crates-io]
-watt = { path = "." }
+# [patch.crates-io]
+# watt = { path = "." }
 
 [package.metadata.docs.rs]
 targets = ["x86_64-unknown-linux-gnu"]

@@ -198,28 +198,42 @@
 
 extern crate proc_macro;
 
+// Execution module (interpreter or JIT)
 #[cfg(not(jit))]
 #[path = "interpret.rs"]
 mod exec;
-
-#[cfg(not(jit))]
-#[path = "../runtime/src/lib.rs"]
-mod runtime;
 
 #[cfg(jit)]
 #[path = "jit.rs"]
 mod exec;
 
-#[cfg(jit)]
-#[path = "../jit/src/lib.rs"]
-mod runtime;
-
+// Core watt modules
 mod data;
 mod decode;
 mod encode;
 mod import;
 pub mod metadata;
 mod sym;
+
+// Runtime modules (flattened from runtime/src/ for rustc compatibility)
+mod ast;
+mod binary;
+mod func;
+mod interpreter;
+mod ops;
+mod runtime;
+mod types;
+mod valid;
+mod values;
+
+// Re-export runtime functionality for interpret.rs and internal use
+pub(crate) use binary::decode as decode_module;
+pub(crate) use interpreter::Interpreter;
+pub(crate) use runtime::{
+    alloc_func, get_export, init_store, instantiate_module, invoke_func,
+    module_imports, Extern, ExternVal, FuncAddr, HostFunc, Module, ModuleInst, Store,
+};
+pub(crate) use values::Value;
 
 use proc_macro::TokenStream;
 use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};

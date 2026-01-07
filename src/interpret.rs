@@ -1,6 +1,6 @@
 use crate::data::Data;
 use crate::import;
-use crate::runtime::{
+use crate::{
     alloc_func, decode_module, get_export, init_store, instantiate_module, invoke_func,
     module_imports, Extern, ExternVal, FuncAddr, Module, ModuleInst, Store, Value,
 };
@@ -132,7 +132,7 @@ fn mk_host_func(import: Import, store: &mut Store) -> ExternVal {
 
 #[cfg(watt_debug)]
 fn print_module(module: &Module) {
-    use crate::runtime::module_exports;
+    use crate::runtime::module_exports; // TODO: add module_exports to lib.rs re-exports if needed
 
     let mut imports: Vec<_> = module_imports(module).collect();
     imports.sort_by_key(|entry| entry.1);
