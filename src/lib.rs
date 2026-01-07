@@ -230,7 +230,7 @@ mod runtime_api;
 // Re-export runtime functionality for interpret.rs and internal use
 pub(crate) use runtime_api::{
     alloc_func, decode_module, get_export, init_store, instantiate_module, invoke_func,
-    module_imports, module_exports, Extern, ExternVal, FuncAddr, Module, ModuleInst, Store,
+    module_imports, Extern, ExternVal, FuncAddr, Module, ModuleInst, Store,
 };
 pub(crate) use runtime::HostFunc;
 pub(crate) use interpreter::Interpreter;
