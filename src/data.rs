@@ -45,6 +45,12 @@ impl<T> Collection<T> {
         self.vec.push(value);
         handle as Handle
     }
+
+    /// Check if the collection is empty.
+    /// Used to check if input spans are available for edition-aware span handling.
+    pub fn is_empty(&self) -> bool {
+        self.vec.is_empty()
+    }
 }
 
 impl<T> Index<Handle> for Collection<T> {

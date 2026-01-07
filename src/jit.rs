@@ -37,7 +37,7 @@ impl ThreadState {
             Entry::Vacant(v) => v,
         };
 
-        let module = Module::new(&self.store, instance.wasm);
+        let module = Module::new(&self.store, instance.wasm_bytes());
         let imports = extern_vals(&module, &mut self.store);
         let module_instance = Instance::new(&self.store, &module, &imports).unwrap();
         self.modules.insert(id, module);

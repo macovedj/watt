@@ -218,10 +218,32 @@ mod data;
 mod decode;
 mod encode;
 mod import;
+pub mod metadata;
 mod sym;
 
 use proc_macro::TokenStream;
 use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
+use std::sync::Arc;
+
+/// Wrapper for WASM bytecode that can be either static or owned.
+///
+/// This allows WasmMacro to work both with statically included bytes
+/// (the original watt use case) and with dynamically loaded bytes
+/// (for rustc integration where WASM is loaded from disk).
+#[derive(Clone)]
+enum WasmBytes {
+    Static(&'static [u8]),
+    Owned(Arc<Vec<u8>>),
+}
+
+impl WasmBytes {
+    fn as_slice(&self) -> &[u8] {
+        match self {
+            WasmBytes::Static(bytes) => bytes,
+            WasmBytes::Owned(vec) => vec.as_slice(),
+        }
+    }
+}
 
 /// An instantiation of a WebAssembly module used to invoke procedural macro
 /// methods on the wasm module.
@@ -236,7 +258,7 @@ use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
 /// # };
 /// ```
 pub struct WasmMacro {
-    wasm: &'static [u8],
+    wasm: WasmBytes,
     id: AtomicUsize,
 }
 
@@ -253,9 +275,27 @@ impl WasmMacro {
     /// ```
     pub const fn new(wasm: &'static [u8]) -> WasmMacro {
         WasmMacro {
-            wasm,
+            wasm: WasmBytes::Static(wasm),
             id: AtomicUsize::new(0),
         }
+    }
+
+    /// Creates a new `WasmMacro` from an owned Vec of wasm bytes.
+    ///
+    /// This is added for rustc integration where WASM bytecode is loaded
+    /// from disk rather than being statically included.
+    pub fn new_owned(wasm: Vec<u8>) -> WasmMacro {
+        WasmMacro {
+            wasm: WasmBytes::Owned(Arc::new(wasm)),
+            id: AtomicUsize::new(0),
+        }
+    }
+
+    /// Get the wasm bytes as a slice.
+    ///
+    /// This is useful for extracting metadata from the WASM module.
+    pub fn wasm_bytes(&self) -> &[u8] {
+        self.wasm.as_slice()
     }
 
     /// A #\[proc_macro\] implemented in wasm!
