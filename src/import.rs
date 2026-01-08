@@ -1,6 +1,4 @@
-use crate::func::{func1, mem_func2};
-use crate::runtime::HostFunc;
-use crate::Store;
+use crate::runtime::{func1, mem_func2, HostFunc, Store};
 use crate::sym;
 
 pub fn host_func(name: &str, store: &Store) -> HostFunc {
