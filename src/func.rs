@@ -1,4 +1,4 @@
-use crate::{HostFunc, Interpreter, Store, Value};
+use super::{HostFunc, Interpreter, Store, Value};
 
 pub trait WasmArg: Sized {
     fn pop(interp: &mut Interpreter) -> Self;

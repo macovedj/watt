@@ -35,21 +35,29 @@
     clippy::wrong_self_convention
 )]
 
-// Re-exports for external use
-pub use crate::ast::Module;
-pub use crate::func::{func1, mem_func2};
-pub use crate::interpreter::Interpreter;
-pub use crate::runtime::{ExternVal, FuncAddr, HostFunc, ModuleInst};
-pub use crate::types::Extern;
-pub use crate::values::Value;
+#[macro_use]
+pub mod interpreter;
+pub mod ast;
+mod binary;
+pub mod func;
+pub mod ops;
+pub mod runtime;
+pub mod types;
+mod valid;
+pub mod values;
 
-use crate::ast;
-use crate::binary;
-use crate::interpreter::{eval_const_expr, Trap, TrapOrigin};
-use crate::runtime::*;
-use crate::types;
-use crate::valid;
-use crate::values;
+pub use self::ast::Module;
+pub use self::func::{func1, mem_func2};
+pub use self::interpreter::Interpreter;
+pub use self::runtime::{ExternVal, FuncAddr, HostFunc, ModuleInst};
+pub use self::types::Extern;
+pub use self::values::Value;
+
+#[cfg(feature = "test")]
+pub use self::runtime::{GlobalAddr, MemAddr, TableAddr, PAGE_SIZE};
+
+use self::interpreter::{eval_const_expr, Trap, TrapOrigin};
+use self::runtime::*;
 use std::collections::HashMap;
 use std::io::{Read, Seek};
 use std::rc::Rc;
@@ -123,7 +131,8 @@ pub fn validate_module(module: &ast::Module) -> Option<Error> {
 pub fn module_imports<'a>(
     module: &'a ast::Module,
 ) -> impl Iterator<Item = (&'a str, &'a str, types::Extern)> + 'a {
-    assert!(valid::is_valid(module));
+    let is_valid = valid::is_valid(module);
+    assert!(is_valid);
 
     module.imports.iter().map(move |import| {
         (
@@ -141,15 +150,12 @@ pub fn module_exports<'a>(
 ) -> impl Iterator<Item = (&'a str, types::Extern)> + 'a {
     assert!(valid::is_valid(module));
 
-    // Imports can be exported
-    // "The index space for functions, tables, memories and globals includes respective imports declared in the same module."
-    // https://webassembly.github.io/spec/syntax/modules.html#indices
     let mut func_import_types = Vec::new();
     let mut table_import_types = Vec::new();
     let mut mem_import_types = Vec::new();
     let mut global_import_types = Vec::new();
     for import in &module.imports {
-        use crate::ast::*;
+        use self::ast::*;
         match &import.desc {
             ImportDesc::Func(idx) => func_import_types.push(module.types[*idx as usize].clone()),
             ImportDesc::Table(type_) => table_import_types.push(type_.clone()),
@@ -159,8 +165,8 @@ pub fn module_exports<'a>(
     }
 
     module.exports.iter().map(move |export| {
-        use crate::ast::*;
-        use crate::types::*;
+        use self::ast::*;
+        use self::types::*;
         let export_type = match export.desc {
             ExportDesc::Func(idx) => {
                 let len = func_import_types.len();
@@ -260,7 +266,7 @@ pub fn invoke_func(
         return Err(Error::ArgumentTypeMismatch);
     }
 
-    let mut int = crate::interpreter::Interpreter::new(
+    let mut int = interpreter::Interpreter::new(
         &store.funcs,
         &store.tables,
         &mut store.globals,
@@ -669,3 +675,4 @@ fn allocate_and_init_module(
 
     Ok(inst)
 }
+
