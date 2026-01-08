@@ -150,6 +150,9 @@ pub fn module_exports<'a>(
 ) -> impl Iterator<Item = (&'a str, types::Extern)> + 'a {
     assert!(valid::is_valid(module));
 
+    // Imports can be exported
+    // "The index space for functions, tables, memories and globals includes respective imports declared in the same module."
+    // https://webassembly.github.io/spec/syntax/modules.html#indices
     let mut func_import_types = Vec::new();
     let mut table_import_types = Vec::new();
     let mut mem_import_types = Vec::new();
@@ -675,4 +678,3 @@ fn allocate_and_init_module(
 
     Ok(inst)
 }
-

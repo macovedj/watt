@@ -239,4 +239,3 @@ mod tests {
         assert!(matches!(result[2], ProcMacroMetadata::Bang { .. }));
     }
 }
-
