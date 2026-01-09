@@ -554,13 +554,14 @@ impl<R: Read> Decoder<R> {
             }),
 
             // Reference types proposal instructions
-            0xd0 => {
+            // Note: Using 0xc0-0xc2 to match proc-macros compiled with older toolchain
+            0xc0 => {
                 RefNull
             }
-            0xd1 => {
+            0xc1 => {
                 RefIsNull
             }
-            0xd2 => {
+            0xc2 => {
                 let func_index = self.read_index()?;
                 RefFunc(func_index)
             }
