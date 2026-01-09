@@ -33,7 +33,7 @@ impl ThreadState {
             Entry::Vacant(v) => v,
         };
 
-        let cursor = Cursor::new(instance.wasm);
+        let cursor = Cursor::new(instance.wasm_bytes());
         let module = decode_module(cursor).unwrap();
         #[cfg(watt_debug)]
         print_module(&module);

@@ -553,6 +553,72 @@ impl<R: Read> Decoder<R> {
                 to: Float(F64),
             }),
 
+            // Reference types proposal instructions
+            0xd0 => {
+                RefNull
+            }
+            0xd1 => {
+                RefIsNull
+            }
+            0xd2 => {
+                let func_index = self.read_index()?;
+                RefFunc(func_index)
+            }
+
+            // Bulk memory operations (0xfc prefix)
+            0xfc => {
+                let bulk_op = self.read_vu32()?;
+                match bulk_op {
+                    0x08 => {
+                        let data_idx = self.read_index()?;
+                        let _mem_idx = self.read_byte()?; // Always 0 in MVP
+                        MemoryInit(data_idx)
+                    }
+                    0x09 => {
+                        let data_idx = self.read_index()?;
+                        DataDrop(data_idx)
+                    }
+                    0x0a => {
+                        let _dst_mem = self.read_byte()?; // Always 0 in MVP
+                        let _src_mem = self.read_byte()?; // Always 0 in MVP
+                        MemoryCopy
+                    }
+                    0x0b => {
+                        let _mem_idx = self.read_byte()?; // Always 0 in MVP
+                        MemoryFill
+                    }
+                    0x0c => {
+                        let elem_idx = self.read_index()?;
+                        let table_idx = self.read_index()?;
+                        TableInit(elem_idx, table_idx)
+                    }
+                    0x0d => {
+                        let elem_idx = self.read_index()?;
+                        ElemDrop(elem_idx)
+                    }
+                    0x0e => {
+                        let dst_table = self.read_index()?;
+                        let src_table = self.read_index()?;
+                        TableCopy(dst_table, src_table)
+                    }
+                    0x0f => {
+                        let table_idx = self.read_index()?;
+                        TableGrow(table_idx)
+                    }
+                    0x10 => {
+                        let table_idx = self.read_index()?;
+                        TableSize(table_idx)
+                    }
+                    0x11 => {
+                        let table_idx = self.read_index()?;
+                        TableFill(table_idx)
+                    }
+                    _ => {
+                        return Err(DecodeError::MalformedBinary);
+                    }
+                }
+            }
+
             _ => return Err(DecodeError::MalformedBinary),
         }))
     }

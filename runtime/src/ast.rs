@@ -147,6 +147,23 @@ pub enum Instr {
     IRel(types::Int, IRelOp),                      // integer numeric comparison
     FRel(types::Float, FRelOp),                    // floating numeric comparison
     Convert(ConvertOp),                            // conversion
+
+    // Reference types proposal instructions
+    RefNull,                                       // push null reference (0xd0)
+    RefIsNull,                                     // test if reference is null (0xd1)
+    RefFunc(Index),                                // get reference to function (0xd2)
+
+    // Bulk memory operations (0xfc prefix)
+    MemoryInit(Index),                             // copy from data segment to memory (0xfc 0x08)
+    DataDrop(Index),                               // drop data segment (0xfc 0x09)
+    MemoryCopy,                                    // copy memory region (0xfc 0x0a)
+    MemoryFill,                                    // fill memory region (0xfc 0x0b)
+    TableInit(Index, Index),                       // copy from element segment to table (0xfc 0x0c)
+    ElemDrop(Index),                               // drop element segment (0xfc 0x0d)
+    TableCopy(Index, Index),                       // copy table region (0xfc 0x0e)
+    TableGrow(Index),                              // grow table (0xfc 0x0f)
+    TableSize(Index),                              // get table size (0xfc 0x10)
+    TableFill(Index),                              // fill table region (0xfc 0x11)
 }
 
 pub type Expr = Vec<Instr>;

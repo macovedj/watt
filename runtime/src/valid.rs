@@ -413,6 +413,75 @@ fn check_instr<'a>(
         Convert(ref convert_op) => {
             check_convert_op(operands, frames, convert_op)?;
         }
+
+        // Reference types proposal instructions
+        RefNull => {
+            // Pushes a null reference (represented as i32)
+            operands.push(Operand::Exact(Int(I32)));
+        }
+
+        RefIsNull => {
+            // Pops a reference, pushes i32 (0 or 1)
+            let _ = pop_operand(operands, frames)?;
+            operands.push(Operand::Exact(Int(I32)));
+        }
+
+        RefFunc(_func_index) => {
+            // Pushes a function reference (represented as i32)
+            operands.push(Operand::Exact(Int(I32)));
+        }
+
+        // Bulk memory operations
+        MemoryInit(_data_idx) => {
+            require(!mod_ctx.memories.is_empty())?;
+            // [i32 i32 i32] -> []
+            exact_step(operands, frames, &[Int(I32), Int(I32), Int(I32)], &[])?;
+        }
+
+        DataDrop(_data_idx) => {
+            // [] -> []
+        }
+
+        MemoryCopy => {
+            require(!mod_ctx.memories.is_empty())?;
+            // [i32 i32 i32] -> []
+            exact_step(operands, frames, &[Int(I32), Int(I32), Int(I32)], &[])?;
+        }
+
+        MemoryFill => {
+            require(!mod_ctx.memories.is_empty())?;
+            // [i32 i32 i32] -> []
+            exact_step(operands, frames, &[Int(I32), Int(I32), Int(I32)], &[])?;
+        }
+
+        TableInit(_elem_idx, _table_idx) => {
+            // [i32 i32 i32] -> []
+            exact_step(operands, frames, &[Int(I32), Int(I32), Int(I32)], &[])?;
+        }
+
+        ElemDrop(_elem_idx) => {
+            // [] -> []
+        }
+
+        TableCopy(_dst_table, _src_table) => {
+            // [i32 i32 i32] -> []
+            exact_step(operands, frames, &[Int(I32), Int(I32), Int(I32)], &[])?;
+        }
+
+        TableGrow(_table_idx) => {
+            // [ref i32] -> [i32]
+            exact_step(operands, frames, &[Int(I32), Int(I32)], &[Int(I32)])?;
+        }
+
+        TableSize(_table_idx) => {
+            // [] -> [i32]
+            exact_step(operands, frames, &[], &[Int(I32)])?;
+        }
+
+        TableFill(_table_idx) => {
+            // [i32 ref i32] -> []
+            exact_step(operands, frames, &[Int(I32), Int(I32), Int(I32)], &[])?;
+        }
     }
 
     Some(())
