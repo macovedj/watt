@@ -198,9 +198,10 @@
 
 extern crate rustc_proc_macro as proc_macro;
 
-// Re-export watt-runtime as the runtime module.
-// Using `pub extern crate` makes it accessible as `crate::runtime` for other modules.
-pub extern crate watt_runtime as runtime;
+// Include the runtime directly from its source directory.
+// This avoids duplicating files while keeping the module structure.
+#[path = "../runtime/src/lib.rs"]
+mod runtime;
 
 #[path = "interpret.rs"]
 mod exec;

@@ -6,7 +6,6 @@ description = "WebAssembly runtime for executing procedural macros (from watt)"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
-watt-runtime = { path = "./runtime" }
 rustc_proc_macro = { path = "../rustc_proc_macro" }
 
 [lib]
