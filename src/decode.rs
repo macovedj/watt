@@ -70,7 +70,14 @@ impl Decode for Span {
     fn decode(bytes: &mut &[u8], data: &Data) -> Self {
         let idx = u32::decode(bytes, data);
         if idx == u32::max_value() {
-            Span::call_site()
+            // For synthetic spans (from quote! etc), try to use the first input span
+            // if available, as it carries the correct edition from the calling crate.
+            // Fall back to call_site() if no input spans are available.
+            if data.span.is_empty() {
+                Span::call_site()
+            } else {
+                data.span[0]
+            }
         } else {
             data.span[idx]
         }

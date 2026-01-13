@@ -1,8 +1,9 @@
 use crate::data::Data;
+use crate::runtime::HostFunc;
 use crate::import;
 use crate::runtime::{
     alloc_func, decode_module, get_export, init_store, instantiate_module, invoke_func,
-    module_imports, Extern, ExternVal, FuncAddr, HostFunc, Module, ModuleInst, Store, Value,
+    module_imports, Extern, ExternVal, FuncAddr, Module, ModuleInst, Store, Value,
 };
 use crate::WasmMacro;
 use proc_macro::TokenStream;
@@ -35,8 +36,12 @@ impl ThreadState {
 
         let cursor = Cursor::new(instance.wasm_bytes());
         let module = match decode_module(cursor) {
-            Ok(m) => m,
-            Err(e) => panic!("Failed to decode WASM module: {:?}", e),
+            Ok(m) => {
+                m
+            }
+            Err(e) => {
+                panic!("Failed to decode WASM module: {:?}", e);
+            }
         };
         #[cfg(watt_debug)]
         print_module(&module);
@@ -83,16 +88,28 @@ struct Exports {
 impl Exports {
     fn collect(instance: &ModuleInst, entry_point: &str) -> Self {
         let main = match get_export(instance, entry_point) {
-            Ok(ExternVal::Func(main)) => main,
-            _ => unimplemented!("unresolved macro: {:?}", entry_point),
+            Ok(ExternVal::Func(main)) => {
+                main
+            }
+            _ => {
+                unimplemented!("unresolved macro: {:?}", entry_point)
+            }
         };
         let raw_to_token_stream = match get_export(instance, "raw_to_token_stream") {
-            Ok(ExternVal::Func(func)) => func,
-            _ => unimplemented!("raw_to_token_stream not found"),
+            Ok(ExternVal::Func(func)) => {
+                func
+            }
+            _ => {
+                unimplemented!("raw_to_token_stream not found")
+            }
         };
         let token_stream_into_raw = match get_export(instance, "token_stream_into_raw") {
-            Ok(ExternVal::Func(func)) => func,
-            _ => unimplemented!("token_stream_into_raw not found"),
+            Ok(ExternVal::Func(func)) => {
+                func
+            }
+            _ => {
+                unimplemented!("token_stream_into_raw not found")
+            }
         };
         Exports {
             main,
@@ -128,13 +145,14 @@ fn mk_host_func(import: Import, store: &mut Store) -> ExternVal {
             unimplemented!("unsupported import")
         }
     };
-
+    
     if module == "watt-0.5" || module == "watt-0.4" {
         let hostfunc = import::host_func(name, store);
         ExternVal::Func(alloc_func(store, func, hostfunc))
     } else if module == "wasi_snapshot_preview1" {
         // WASI stub: return 0 (success) for all WASI functions
         // This allows wasm32-wasip1 compiled proc-macros to run
+        eprintln!("[WATT WASI STUB] {}::{}", module, name);
         let hostfunc: HostFunc = Box::new(move |interp| {
             interp.push(Value::I32(0));
             None
@@ -152,12 +170,8 @@ fn print_module(module: &Module) {
     let mut imports: Vec<_> = module_imports(module).collect();
     imports.sort_by_key(|entry| entry.1);
     for (_env, name, sig) in imports {
-        eprintln!("IMPORT {:?}: {:?}", name, sig);
     }
 
     let mut exports: Vec<_> = module_exports(module).collect();
     exports.sort_by_key(|entry| entry.0);
-    for (name, sig) in exports {
-        eprintln!("EXPORT {:?}: {:?}", name, sig);
-    }
 }

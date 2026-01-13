@@ -250,8 +250,7 @@ impl<R: Read> Decoder<R> {
         use super::types::Value::*;
 
         let opcode = self.read_byte()?;
-
-        Ok(MetaInstr::Instr(match opcode {
+        let result = Ok(MetaInstr::Instr(match opcode {
             0x00 => Unreachable,
             0x01 => Nop,
 
@@ -557,70 +556,77 @@ impl<R: Read> Decoder<R> {
                 to: Float(F64),
             }),
 
-            // Reference types proposal (opcodes 0xc0-0xc2 as emitted by LLVM)
-            0xc0 => RefNull,
-            0xc1 => RefIsNull,
-            0xc2 => RefFunc(self.read_index()?),
+            // Reference types proposal instructions
+            0xc0 => {
+                RefNull
+            }
+            0xc1 => {
+                RefIsNull
+            }
+            0xc2 => {
+                let func_index = self.read_index()?;
+                RefFunc(func_index)
+            }
 
-            // Bulk memory and table operations (0xfc prefix)
+            // Bulk memory operations (0xfc prefix)
             0xfc => {
-                let sub_opcode = self.read_vu32()?;
-                match sub_opcode {
+                let bulk_op = self.read_vu32()?;
+                match bulk_op {
                     0x08 => {
-                        // memory.init
                         let data_idx = self.read_index()?;
-                        let _mem_idx = self.read_byte()?; // must be 0 for MVP
+                        let _mem_idx = self.read_byte()?; // Always 0 in MVP
                         MemoryInit(data_idx)
                     }
                     0x09 => {
-                        // data.drop
-                        DataDrop(self.read_index()?)
+                        let data_idx = self.read_index()?;
+                        DataDrop(data_idx)
                     }
                     0x0a => {
-                        // memory.copy
-                        let _dst_mem = self.read_byte()?; // must be 0 for MVP
-                        let _src_mem = self.read_byte()?; // must be 0 for MVP
+                        let _dst_mem = self.read_byte()?; // Always 0 in MVP
+                        let _src_mem = self.read_byte()?; // Always 0 in MVP
                         MemoryCopy
                     }
                     0x0b => {
-                        // memory.fill
-                        let _mem_idx = self.read_byte()?; // must be 0 for MVP
+                        let _mem_idx = self.read_byte()?; // Always 0 in MVP
                         MemoryFill
                     }
                     0x0c => {
-                        // table.init
                         let elem_idx = self.read_index()?;
                         let table_idx = self.read_index()?;
                         TableInit(elem_idx, table_idx)
                     }
                     0x0d => {
-                        // elem.drop
-                        ElemDrop(self.read_index()?)
+                        let elem_idx = self.read_index()?;
+                        ElemDrop(elem_idx)
                     }
                     0x0e => {
-                        // table.copy
                         let dst_table = self.read_index()?;
                         let src_table = self.read_index()?;
                         TableCopy(dst_table, src_table)
                     }
                     0x0f => {
-                        // table.grow
-                        TableGrow(self.read_index()?)
+                        let table_idx = self.read_index()?;
+                        TableGrow(table_idx)
                     }
                     0x10 => {
-                        // table.size
-                        TableSize(self.read_index()?)
+                        let table_idx = self.read_index()?;
+                        TableSize(table_idx)
                     }
                     0x11 => {
-                        // table.fill
-                        TableFill(self.read_index()?)
+                        let table_idx = self.read_index()?;
+                        TableFill(table_idx)
                     }
-                    _ => return Err(DecodeError::MalformedBinary),
+                    _ => {
+                        return Err(DecodeError::MalformedBinary);
+                    }
                 }
             }
 
-            _ => return Err(DecodeError::MalformedBinary),
-        }))
+            _ => {
+                return Err(DecodeError::MalformedBinary);
+            }
+        }));
+        result
     }
 
     fn read_instr_block_with_delim(&mut self) -> DecodeResult<(Vec<Instr>, PseudoInstr)> {
@@ -801,15 +807,39 @@ impl<R: Read> Decoder<R> {
     }
 
     fn read_code(&mut self) -> DecodeResult<(Vec<types::Value>, Expr)> {
-        let _size = self.read_vu32()?;
+        let size = self.read_vu32()?;
         // TODO: do not create intermediate vectors just to concatenate them
-        let locals = self.read_vec(Decoder::read_locals)?.concat();
-        let body = self.read_expr()?;
+        let locals = match self.read_vec(Decoder::read_locals) {
+            Ok(l) => {
+                l.concat()
+            }
+            Err(e) => {
+                return Err(e);
+            }
+        };
+        let body = match self.read_expr() {
+            Ok(b) => {
+                b
+            }
+            Err(e) => {
+                return Err(e);
+            }
+        };
         Ok((locals, body))
     }
 
     fn read_code_section(&mut self) -> DecodeResult<Vec<(Vec<types::Value>, Expr)>> {
-        self.read_vec(Decoder::read_code)
+        let count = self.read_vu32()?;
+        let mut result = Vec::with_capacity(count as usize);
+        for i in 0..count {
+            match self.read_code() {
+                Ok(code) => result.push(code),
+                Err(e) => {
+                    return Err(e);
+                }
+            }
+        }
+        Ok(result)
     }
 
     fn read_data(&mut self) -> DecodeResult<Segment<u8>> {
@@ -846,25 +876,29 @@ impl<R: Read> Decoder<R> {
 
         loop {
             match self.read_byte() {
-                Err(DecodeError::Io(ref e)) if e.kind() == io::ErrorKind::UnexpectedEof => break,
+                Err(DecodeError::Io(ref e)) if e.kind() == io::ErrorKind::UnexpectedEof => {
+                    break
+                },
                 Err(e) => return Err(e),
                 Ok(id) => {
                     let size = self.read_vu32()?;
 
                     match id {
-                        0 => self.skip_custom_section(size)?, // ignore custom sections
-                        1 => types = self.read_type_section()?,
-                        2 => imports = self.read_import_section()?,
-                        3 => func_types = self.read_func_section()?,
-                        4 => tables = self.read_table_section()?,
-                        5 => memories = self.read_memory_section()?,
-                        6 => globals = self.read_global_section()?,
-                        7 => exports = self.read_export_section()?,
-                        8 => start = self.read_start_section()?,
-                        9 => elems = self.read_elem_section()?,
-                        10 => func_bodies = self.read_code_section()?,
-                        11 => data = self.read_data_section()?,
-                        _ => return Err(DecodeError::MalformedBinary),
+                        0 => {  self.skip_custom_section(size)?; }, // ignore custom sections
+                        1 => {  types = self.read_type_section()?; },
+                        2 => {  imports = self.read_import_section()?; },
+                        3 => {  func_types = self.read_func_section()?; },
+                        4 => {  tables = self.read_table_section()?; },
+                        5 => {  memories = self.read_memory_section()?; },
+                        6 => {  globals = self.read_global_section()?; },
+                        7 => {  exports = self.read_export_section()?; },
+                        8 => {  start = self.read_start_section()?; },
+                        9 => {  elems = self.read_elem_section()?; },
+                        10 => { func_bodies = self.read_code_section()?; },
+                        11 => { data = self.read_data_section()?; },
+                        _ => {
+                            return Err(DecodeError::MalformedBinary);
+                        }
                     }
                 }
             }
