@@ -196,7 +196,7 @@
     clippy::needless_pass_by_value
 )]
 
-extern crate proc_macro;
+extern crate rustc_proc_macro as proc_macro;
 
 // Use watt-runtime as a proper crate dependency instead of #[path] includes.
 // This allows the crate to work correctly when used as a git submodule.
