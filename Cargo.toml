@@ -9,17 +9,18 @@ edition = "2021"
 include = [
     "LICENSE_APACHE",
     "LICENSE_MIT",
-    "jit/src/*",
-    "runtime/LICENSE_ISC",
-    "runtime/src/*",
+    "runtime/",
     "src/*",
 ]
 keywords = ["macros", "wasm"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/dtolnay/watt"
 
+[dependencies]
+watt-runtime = { path = "./runtime" }
+
 [workspace]
-members = ["demo/caller", "demo/wa", "proc-macro", "runtime/tests"]
+members = ["demo/caller", "demo/wa", "proc-macro", "runtime", "runtime/tests"]
 
 [patch.crates-io]
 watt = { path = "." }

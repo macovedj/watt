@@ -2,7 +2,7 @@ use crate::data::Data;
 use crate::import;
 use crate::runtime::{
     alloc_func, decode_module, get_export, init_store, instantiate_module, invoke_func,
-    module_imports, Extern, ExternVal, FuncAddr, Module, ModuleInst, Store, Value,
+    module_imports, Extern, ExternVal, FuncAddr, HostFunc, Module, ModuleInst, Store, Value,
 };
 use crate::WasmMacro;
 use proc_macro::TokenStream;
@@ -33,8 +33,11 @@ impl ThreadState {
             Entry::Vacant(v) => v,
         };
 
-        let cursor = Cursor::new(instance.wasm);
-        let module = decode_module(cursor).unwrap();
+        let cursor = Cursor::new(instance.wasm_bytes());
+        let module = match decode_module(cursor) {
+            Ok(m) => m,
+            Err(e) => panic!("Failed to decode WASM module: {:?}", e),
+        };
         #[cfg(watt_debug)]
         print_module(&module);
         let extern_vals = extern_vals(&module, &mut self.store);
@@ -119,15 +122,27 @@ fn extern_vals(module: &Module, store: &mut Store) -> Vec<ExternVal> {
 
 fn mk_host_func(import: Import, store: &mut Store) -> ExternVal {
     let (module, name, ref sig) = import;
-    assert_eq!(module, "watt-0.5", "Wasm import from unknown module");
     let func = match sig {
         Extern::Func(func) => func,
         Extern::Table(_) | Extern::Memory(_) | Extern::Global(_) => {
             unimplemented!("unsupported import")
         }
     };
-    let hostfunc = import::host_func(name, store);
-    ExternVal::Func(alloc_func(store, func, hostfunc))
+
+    if module == "watt-0.5" || module == "watt-0.4" {
+        let hostfunc = import::host_func(name, store);
+        ExternVal::Func(alloc_func(store, func, hostfunc))
+    } else if module == "wasi_snapshot_preview1" {
+        // WASI stub: return 0 (success) for all WASI functions
+        // This allows wasm32-wasip1 compiled proc-macros to run
+        let hostfunc: HostFunc = Box::new(move |interp| {
+            interp.push(Value::I32(0));
+            None
+        });
+        ExternVal::Func(alloc_func(store, func, hostfunc))
+    } else {
+        panic!("Wasm import from unknown module: {}", module);
+    }
 }
 
 #[cfg(watt_debug)]

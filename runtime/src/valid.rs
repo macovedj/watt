@@ -413,6 +413,60 @@ fn check_instr<'a>(
         Convert(ref convert_op) => {
             check_convert_op(operands, frames, convert_op)?;
         }
+
+        // Reference types - represent as i32 for now
+        RefNull => {
+            operands.push(Operand::Exact(Int(I32)));
+        }
+        RefIsNull => {
+            let _ = pop_operand(operands, frames)?;
+            operands.push(Operand::Exact(Int(I32)));
+        }
+        RefFunc(_) => {
+            operands.push(Operand::Exact(Int(I32)));
+        }
+
+        // Bulk memory operations
+        MemoryInit(_) => {
+            require(!mod_ctx.memories.is_empty())?;
+            exact_step(operands, frames, &[Int(I32), Int(I32), Int(I32)], &[])?;
+        }
+        DataDrop(_) => {
+            // No stack effect
+        }
+        MemoryCopy => {
+            require(!mod_ctx.memories.is_empty())?;
+            exact_step(operands, frames, &[Int(I32), Int(I32), Int(I32)], &[])?;
+        }
+        MemoryFill => {
+            require(!mod_ctx.memories.is_empty())?;
+            exact_step(operands, frames, &[Int(I32), Int(I32), Int(I32)], &[])?;
+        }
+
+        // Table operations
+        TableInit(_, _) => {
+            require(!mod_ctx.tables.is_empty())?;
+            exact_step(operands, frames, &[Int(I32), Int(I32), Int(I32)], &[])?;
+        }
+        ElemDrop(_) => {
+            // No stack effect
+        }
+        TableCopy(_, _) => {
+            require(!mod_ctx.tables.is_empty())?;
+            exact_step(operands, frames, &[Int(I32), Int(I32), Int(I32)], &[])?;
+        }
+        TableGrow(_) => {
+            require(!mod_ctx.tables.is_empty())?;
+            exact_step(operands, frames, &[Int(I32), Int(I32)], &[Int(I32)])?;
+        }
+        TableSize(_) => {
+            require(!mod_ctx.tables.is_empty())?;
+            exact_step(operands, frames, &[], &[Int(I32)])?;
+        }
+        TableFill(_) => {
+            require(!mod_ctx.tables.is_empty())?;
+            exact_step(operands, frames, &[Int(I32), Int(I32), Int(I32)], &[])?;
+        }
     }
 
     Some(())

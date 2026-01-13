@@ -1,0 +1,15 @@
+[package]
+name = "watt-runtime"
+version = "0.5.0"
+authors = ["David Tolnay <dtolnay@gmail.com>"]
+edition = "2021"
+description = "WebAssembly interpreter runtime for watt procedural macros"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/dtolnay/watt"
+
+# No external dependencies - pure Rust interpreter
+[dependencies]
+
+[features]
+default = []
+test = []  # Enable test-only APIs
