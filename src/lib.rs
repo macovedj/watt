@@ -198,9 +198,9 @@
 
 extern crate rustc_proc_macro as proc_macro;
 
-// Use watt-runtime as a proper crate dependency instead of #[path] includes.
-// This allows the crate to work correctly when used as a git submodule.
-use watt_runtime as runtime;
+// Re-export watt-runtime as the runtime module.
+// Using `pub extern crate` makes it accessible as `crate::runtime` for other modules.
+pub extern crate watt_runtime as runtime;
 
 #[path = "interpret.rs"]
 mod exec;
