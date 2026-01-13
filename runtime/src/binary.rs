@@ -553,10 +553,10 @@ impl<R: Read> Decoder<R> {
                 to: Float(F64),
             }),
 
-            // Reference types proposal
-            0xd0 => RefNull,
-            0xd1 => RefIsNull,
-            0xd2 => RefFunc(self.read_index()?),
+            // Reference types proposal (opcodes 0xc0-0xc2 as emitted by LLVM)
+            0xc0 => RefNull,
+            0xc1 => RefIsNull,
+            0xc2 => RefFunc(self.read_index()?),
 
             // Bulk memory and table operations (0xfc prefix)
             0xfc => {
