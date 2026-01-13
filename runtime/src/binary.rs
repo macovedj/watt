@@ -286,7 +286,11 @@ impl<R: Read> Decoder<R> {
             0x10 => Call(self.read_index()?),
             0x11 => {
                 let index = self.read_index()?;
-                if self.read_byte()? != 0 {
+                // In WASM MVP, this was a reserved byte that must be 0
+                // In newer WASM (reference-types proposal), this is a varuint32 table index
+                // Try reading as varuint32 to support both formats
+                let table_index = self.read_vu32()?;
+                if table_index != 0 {
                     return Err(DecodeError::MalformedBinary);
                 }
                 CallIndirect(index)
