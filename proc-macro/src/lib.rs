@@ -212,29 +212,11 @@ impl Span {
         }
     }
 
-    /// Returns a span with the `mixed_site` hygiene context.
-    /// In watt, this is equivalent to `call_site()` since hygiene
-    /// is not fully modeled in the WASM bridge.
-    pub fn mixed_site() -> Self {
-        Span::call_site()
-    }
-
     pub fn join(&self, other: Span) -> Option<Span> {
         let _ = other;
         None
     }
 
-    /// Returns a `Span` with the same location but resolved at the other span.
-    /// In watt, span resolution isn't meaningful, so this returns `self`.
-    pub fn resolved_at(&self, _other: Span) -> Span {
-        *self
-    }
-
-    /// Returns a `Span` located at the other span but resolved at this span.
-    /// In watt, span resolution isn't meaningful, so this returns `self`.
-    pub fn located_at(&self, _other: Span) -> Span {
-        *self
-    }
 }
 
 pub enum TokenTree {
