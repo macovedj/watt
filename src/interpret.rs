@@ -150,11 +150,32 @@ fn mk_host_func(import: Import, store: &mut Store) -> ExternVal {
         let hostfunc = import::host_func(name, store);
         ExternVal::Func(alloc_func(store, func, hostfunc))
     } else if module == "wasi_snapshot_preview1" {
-        // WASI stub: return 0 (success) for all WASI functions
-        // This allows wasm32-wasip1 compiled proc-macros to run
-        eprintln!("[WATT WASI STUB] {}::{}", module, name);
+        // WASI stubs for wasm32-wasip1 compiled proc-macros
+        let name_owned = name.to_string();
         let hostfunc: HostFunc = Box::new(move |interp| {
-            interp.push(Value::I32(0));
+            eprintln!("[WATT WASI STUB] wasi_snapshot_preview1::{}", name_owned);
+            match name_owned.as_str() {
+                "proc_exit" => {
+                    // proc_exit should halt execution - return a trap
+                    let exit_code = interp.pop().map(|v| match v {
+                        Value::I32(code) => code,
+                        _ => -1,
+                    }).unwrap_or(-1);
+                    return Some(format!("proc_exit called with code {}", exit_code));
+                }
+                "environ_sizes_get" | "environ_get" => {
+                    // Return success (0) - caller handles empty env
+                    interp.push(Value::I32(0));
+                }
+                "fd_write" => {
+                    // fd_write returns 0 for success - output discarded
+                    interp.push(Value::I32(0));
+                }
+                _ => {
+                    // Default: return 0 (success)
+                    interp.push(Value::I32(0));
+                }
+            }
             None
         });
         ExternVal::Func(alloc_func(store, func, hostfunc))
