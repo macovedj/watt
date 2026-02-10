@@ -15,10 +15,6 @@ pub fn string_new(memory: &mut [u8], ptr: u32, len: u32) -> u32 {
     let len_usize = len as usize;
     let ptr_usize = ptr as usize;
     
-    eprintln!("[WATT SYM] string_new: checking bounds ptr_usize={} + len_usize={} = {}, memory.len()={}", 
-              ptr_usize, len_usize, ptr_usize + len_usize, memory.len());
-    { use std::io::Write; let _ = std::io::stderr().flush(); }
-    
     if ptr_usize + len_usize > memory.len() {
         eprintln!("[WATT SYM] string_new: OUT OF BOUNDS!");
         { use std::io::Write; let _ = std::io::stderr().flush(); }
@@ -26,22 +22,13 @@ pub fn string_new(memory: &mut [u8], ptr: u32, len: u32) -> u32 {
     }
     
     let bytes = memory[ptr_usize..ptr_usize + len_usize].to_owned();
-    eprintln!("[WATT SYM] string_new: got {} bytes", bytes.len());
-    { use std::io::Write; let _ = std::io::stderr().flush(); }
     
     Data::with(|d| {
-        match String::from_utf8(bytes) {
-            Ok(string) => {
-                eprintln!("[WATT SYM] string_new: valid UTF-8, pushing string");
-                { use std::io::Write; let _ = std::io::stderr().flush(); }
-                d.string.push(string)
-            }
-            Err(e) => {
-                eprintln!("[WATT SYM] string_new: UTF-8 error: {:?}", e);
-                { use std::io::Write; let _ = std::io::stderr().flush(); }
-                panic!("non-utf8")
-            }
-        }
+        // Use lossy conversion to see the message even with invalid UTF-8
+        let string = String::from_utf8_lossy(&bytes).into_owned();
+        eprintln!("[WATT SYM] string_new content: {}", string);
+        { use std::io::Write; let _ = std::io::stderr().flush(); }
+        d.string.push(string)
     })
 }
 pub fn string_len(string: u32) -> u32 { eprintln!("[WATT SYM] string_len({})", string); { use std::io::Write; let _ = std::io::stderr().flush(); }
