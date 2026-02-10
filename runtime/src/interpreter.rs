@@ -320,7 +320,7 @@ impl<'a> Interpreter<'a> {
     }
 
     /// Raises an unconditional trap
-    fn unreachable(&self) -> IntResult {
+    fn unreachable(&self) -> IntResult { eprintln!("[WATT DEBUG] UNREACHABLE hit! Stack depth: {}", self.stack.len());
         Err(Trap {
             origin: TrapOrigin::Unreachable,
         })
