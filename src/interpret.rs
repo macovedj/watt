@@ -183,7 +183,7 @@ fn mk_host_func(import: Import, store: &mut Store) -> ExternVal {
                             mem[buf_ptr + i] = ((buf_ptr + i) * 31 + 17) as u8;
                         }
                     }
-                    interp.push(Value::I32(0)); eprintln!("[WATT WASI DEBUG] After push, stack depth: {}", interp.stack.len()); // Success
+                    interp.push(Value::I32(0)); eprintln!("[WATT WASI DEBUG] After push, stack depth: {}", interp.stack.len()); { use std::io::Write; let _ = std::io::stderr().flush(); } // Success
                 }
                 "environ_sizes_get" => {
                     // environ_sizes_get(environ_count: *mut size, environ_buf_size: *mut size) -> errno
@@ -205,14 +205,14 @@ fn mk_host_func(import: Import, store: &mut Store) -> ExternVal {
                     if buf_size_ptr + 4 <= mem.len() {
                         mem[buf_size_ptr..buf_size_ptr + 4].copy_from_slice(&0u32.to_le_bytes());
                     }
-                    interp.push(Value::I32(0)); eprintln!("[WATT WASI DEBUG] After push, stack depth: {}", interp.stack.len()); // Success
+                    interp.push(Value::I32(0)); eprintln!("[WATT WASI DEBUG] After push, stack depth: {}", interp.stack.len()); { use std::io::Write; let _ = std::io::stderr().flush(); } // Success
                 }
                 "environ_get" => {
                     // environ_get(environ: *mut *mut u8, environ_buf: *mut u8) -> errno
                     // We have 0 env vars, so just return success without writing
                     let _environ_buf = interp.pop();
                     let _environ = interp.pop();
-                    interp.push(Value::I32(0)); eprintln!("[WATT WASI DEBUG] After push, stack depth: {}", interp.stack.len()); // Success
+                    interp.push(Value::I32(0)); eprintln!("[WATT WASI DEBUG] After push, stack depth: {}", interp.stack.len()); { use std::io::Write; let _ = std::io::stderr().flush(); } // Success
                 }
                 "fd_write" => {
                     // fd_write(fd: fd, iovs: *const ciovec, iovs_len: size, nwritten: *mut size) -> errno
@@ -228,7 +228,7 @@ fn mk_host_func(import: Import, store: &mut Store) -> ExternVal {
                     if nwritten_ptr + 4 <= mem.len() {
                         mem[nwritten_ptr..nwritten_ptr + 4].copy_from_slice(&0u32.to_le_bytes());
                     }
-                    interp.push(Value::I32(0)); eprintln!("[WATT WASI DEBUG] After push, stack depth: {}", interp.stack.len()); // Success
+                    interp.push(Value::I32(0)); eprintln!("[WATT WASI DEBUG] After push, stack depth: {}", interp.stack.len()); { use std::io::Write; let _ = std::io::stderr().flush(); } // Success
                 }
                 _ => {
                     // Default: return 0 (success)

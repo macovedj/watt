@@ -238,7 +238,7 @@ pub fn type_func(store: &Store, funcaddr: FuncAddr) -> types::Func {
         extern_val: ExternVal::Func(funcaddr),
     }) {
         Some(types::Extern::Func(type_)) => type_.clone(),
-        _ => { eprintln!("[WATT] About to panic at lib.rs line {}", line!()); panic!("unreachable"); }
+        _ => { eprintln!("[WATT] About to panic at lib.rs line {}", line!()); { use std::io::Write; let _ = std::io::stderr().flush(); } panic!("unreachable"); }
     }
 }
 
@@ -303,7 +303,7 @@ pub fn type_table(store: &Store, tableaddr: TableAddr) -> types::Table {
         extern_val: ExternVal::Table(tableaddr),
     }) {
         Some(types::Extern::Table(type_)) => type_.clone(),
-        _ => { eprintln!("[WATT] About to panic at lib.rs line {}", line!()); panic!("unreachable"); }
+        _ => { eprintln!("[WATT] About to panic at lib.rs line {}", line!()); { use std::io::Write; let _ = std::io::stderr().flush(); } panic!("unreachable"); }
     }
 }
 
@@ -372,7 +372,7 @@ pub fn type_mem(store: &Store, memaddr: MemAddr) -> types::Memory {
         extern_val: ExternVal::Memory(memaddr),
     }) {
         Some(types::Extern::Memory(type_)) => type_.clone(),
-        _ => { eprintln!("[WATT] About to panic at lib.rs line {}", line!()); panic!("unreachable"); }
+        _ => { eprintln!("[WATT] About to panic at lib.rs line {}", line!()); { use std::io::Write; let _ = std::io::stderr().flush(); } panic!("unreachable"); }
     }
 }
 
@@ -436,7 +436,7 @@ pub fn type_global(store: &Store, globaladdr: GlobalAddr) -> types::Global {
         extern_val: ExternVal::Global(globaladdr),
     }) {
         Some(types::Extern::Global(type_)) => type_.clone(),
-        _ => { eprintln!("[WATT] About to panic at lib.rs line {}", line!()); panic!("unreachable"); }
+        _ => { eprintln!("[WATT] About to panic at lib.rs line {}", line!()); { use std::io::Write; let _ = std::io::stderr().flush(); } panic!("unreachable"); }
     }
 }
 
@@ -515,7 +515,7 @@ pub fn instantiate_module(
     for elem in &module.elems {
         let offset = match eval_const_expr(&store.globals, &imported_globals, &elem.offset) {
             values::Value::I32(c) => c as usize,
-            _ => { eprintln!("[WATT] About to panic at lib.rs line {}", line!()); panic!("unreachable"); }
+            _ => { eprintln!("[WATT] About to panic at lib.rs line {}", line!()); { use std::io::Write; let _ = std::io::stderr().flush(); } panic!("unreachable"); }
         };
         elem_offsets.push(offset);
 
@@ -541,7 +541,7 @@ pub fn instantiate_module(
     for data in &module.data {
         let offset = match eval_const_expr(&store.globals, &imported_globals, &data.offset) {
             values::Value::I32(c) => c as usize,
-            _ => { eprintln!("[WATT] About to panic at lib.rs line {}", line!()); panic!("unreachable"); }
+            _ => { eprintln!("[WATT] About to panic at lib.rs line {}", line!()); { use std::io::Write; let _ = std::io::stderr().flush(); } panic!("unreachable"); }
         };
         data_offsets.push(offset);
 
