@@ -1,14 +1,14 @@
 use crate::data::Data;
 use std::str;
 
-pub fn literal_to_string(literal: u32) -> u32 {
+pub fn literal_to_string(literal: u32) -> u32 { eprintln!("[WATT SYM] literal_to_string({})", literal); { use std::io::Write; let _ = std::io::stderr().flush(); }
     Data::with(|d| {
         let string = d.literal[literal].to_string();
         d.string.push(string)
     })
 }
 
-pub fn string_new(memory: &mut [u8], ptr: u32, len: u32) -> u32 {
+pub fn string_new(memory: &mut [u8], ptr: u32, len: u32) -> u32 { eprintln!("[WATT SYM] string_new(ptr={}, len={})", ptr, len); { use std::io::Write; let _ = std::io::stderr().flush(); }
     Data::with(|d| {
         let len = len as usize;
         let ptr = ptr as usize;
@@ -18,14 +18,14 @@ pub fn string_new(memory: &mut [u8], ptr: u32, len: u32) -> u32 {
     })
 }
 
-pub fn string_len(string: u32) -> u32 {
+pub fn string_len(string: u32) -> u32 { eprintln!("[WATT SYM] string_len({})", string); { use std::io::Write; let _ = std::io::stderr().flush(); }
     Data::with(|d| {
         let string = &d.string[string];
         string.len() as u32
     })
 }
 
-pub fn string_read(memory: &mut [u8], string: u32, ptr: u32) {
+pub fn string_read(memory: &mut [u8], string: u32, ptr: u32) { eprintln!("[WATT SYM] string_read(string={}, ptr={})", string, ptr); { use std::io::Write; let _ = std::io::stderr().flush(); }
     Data::with(|d| {
         let ptr = ptr as usize;
         let string = &d.string[string];
@@ -33,15 +33,15 @@ pub fn string_read(memory: &mut [u8], string: u32, ptr: u32) {
     });
 }
 
-pub fn print_panic(string: u32) {
+pub fn print_panic(string: u32) { eprintln!("[WATT SYM] print_panic({})", string); { use std::io::Write; let _ = std::io::stderr().flush(); }
     Data::with(|d| panic!("{}", d.string[string]));
 }
 
-pub fn bytes_len(bytes: u32) -> u32 {
+pub fn bytes_len(bytes: u32) -> u32 { eprintln!("[WATT SYM] bytes_len({})", bytes); { use std::io::Write; let _ = std::io::stderr().flush(); }
     Data::with(|d| d.bytes[bytes].len() as u32)
 }
 
-pub fn bytes_read(memory: &mut [u8], bytes: u32, ptr: u32) {
+pub fn bytes_read(memory: &mut [u8], bytes: u32, ptr: u32) { eprintln!("[WATT SYM] bytes_read(bytes={}, ptr={})", bytes, ptr); { use std::io::Write; let _ = std::io::stderr().flush(); }
     Data::with(|d| {
         let ptr = ptr as usize;
         let bytes = &d.bytes[bytes];
@@ -49,7 +49,7 @@ pub fn bytes_read(memory: &mut [u8], bytes: u32, ptr: u32) {
     });
 }
 
-pub fn token_stream_serialize(stream: u32) -> u32 {
+pub fn token_stream_serialize(stream: u32) -> u32 { eprintln!("[WATT SYM] token_stream_serialize({})", stream); { use std::io::Write; let _ = std::io::stderr().flush(); }
     Data::with(|d| {
         let stream = d.tokenstream[stream].clone();
         let bytes = crate::encode::encode(stream, d);
@@ -57,7 +57,7 @@ pub fn token_stream_serialize(stream: u32) -> u32 {
     })
 }
 
-pub fn token_stream_deserialize(memory: &mut [u8], ptr: u32, len: u32) -> u32 {
+pub fn token_stream_deserialize(memory: &mut [u8], ptr: u32, len: u32) -> u32 { eprintln!("[WATT SYM] token_stream_deserialize(ptr={}, len={})", ptr, len); { use std::io::Write; let _ = std::io::stderr().flush(); }
     Data::with(|d| {
         let ptr = ptr as usize;
         let len = len as usize;
@@ -67,7 +67,7 @@ pub fn token_stream_deserialize(memory: &mut [u8], ptr: u32, len: u32) -> u32 {
     })
 }
 
-pub fn token_stream_parse(memory: &mut [u8], ptr: u32, len: u32) -> u32 {
+pub fn token_stream_parse(memory: &mut [u8], ptr: u32, len: u32) -> u32 { eprintln!("[WATT SYM] token_stream_parse(ptr={}, len={})", ptr, len); { use std::io::Write; let _ = std::io::stderr().flush(); }
     Data::with(|d| {
         let ptr = ptr as usize;
         let len = len as usize;
