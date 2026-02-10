@@ -130,7 +130,7 @@ impl<'a> Interpreter<'a> {
         use std::sync::atomic::{AtomicU64, Ordering};
         static INSTR_COUNT: AtomicU64 = AtomicU64::new(0);
         let count = INSTR_COUNT.fetch_add(1, Ordering::Relaxed);
-        if count > 1_000_000 && count % 100_000 == 0 {
+        if count > 3_300_000 && count % 1000 == 0 {
             eprintln!("[WATT TRACE] Executed {} instructions, current: {:?}", count, instr);
             use std::io::Write;
             let _ = std::io::stderr().flush();
@@ -930,6 +930,7 @@ impl<'a> Interpreter<'a> {
     }
 
     fn call_host(&mut self, f_inst: &HostFuncInst) -> IntResult {
+        eprintln!("[WATT TRACE] call_host entry"); { use std::io::Write; let _ = std::io::stderr().flush(); }
         /*
         let stack_before_call = self.stack.len();
         */
