@@ -207,15 +207,15 @@ impl<'a> Interpreter<'a> {
                 // Pop: size, src, dest (in reverse order from stack)
                 let size = match self.stack.pop().unwrap() {
                     Value::I32(n) => n as usize,
-                    _ => unreachable!(),
+                    _ => { eprintln!("[WATT] About to panic at interpreter.rs line {}", line!()); panic!("unreachable"); }
                 };
                 let src = match self.stack.pop().unwrap() {
                     Value::I32(n) => n as usize,
-                    _ => unreachable!(),
+                    _ => { eprintln!("[WATT] About to panic at interpreter.rs line {}", line!()); panic!("unreachable"); }
                 };
                 let dest = match self.stack.pop().unwrap() {
                     Value::I32(n) => n as usize,
-                    _ => unreachable!(),
+                    _ => { eprintln!("[WATT] About to panic at interpreter.rs line {}", line!()); panic!("unreachable"); }
                 };
                 
                 // Get memory
@@ -241,15 +241,15 @@ impl<'a> Interpreter<'a> {
                 // Pop: size, value, dest
                 let size = match self.stack.pop().unwrap() {
                     Value::I32(n) => n as usize,
-                    _ => unreachable!(),
+                    _ => { eprintln!("[WATT] About to panic at interpreter.rs line {}", line!()); panic!("unreachable"); }
                 };
                 let value = match self.stack.pop().unwrap() {
                     Value::I32(n) => (n & 0xFF) as u8,
-                    _ => unreachable!(),
+                    _ => { eprintln!("[WATT] About to panic at interpreter.rs line {}", line!()); panic!("unreachable"); }
                 };
                 let dest = match self.stack.pop().unwrap() {
                     Value::I32(n) => n as usize,
-                    _ => unreachable!(),
+                    _ => { eprintln!("[WATT] About to panic at interpreter.rs line {}", line!()); panic!("unreachable"); }
                 };
                 
                 // Get memory
@@ -408,7 +408,7 @@ impl<'a> Interpreter<'a> {
             } else {
                 Continue
             }),
-            _ => unreachable!(),
+            _ => { eprintln!("[WATT] About to panic at interpreter.rs line {}", line!()); panic!("unreachable"); }
         }
     }
 
@@ -418,7 +418,7 @@ impl<'a> Interpreter<'a> {
             Value::I32(c) => Ok(Branch {
                 nesting_levels: *all_levels.get(c as usize).unwrap_or(&default_level),
             }),
-            _ => unreachable!(),
+            _ => { eprintln!("[WATT] About to panic at interpreter.rs line {}", line!()); panic!("unreachable"); }
         }
     }
 
@@ -431,7 +431,7 @@ impl<'a> Interpreter<'a> {
     ) -> IntResult {
         let c = match self.stack.pop().unwrap() {
             Value::I32(c) => c,
-            _ => unreachable!(),
+            _ => { eprintln!("[WATT] About to panic at interpreter.rs line {}", line!()); panic!("unreachable"); }
         };
 
         Ok(if c != 0 {
@@ -454,7 +454,7 @@ impl<'a> Interpreter<'a> {
 
         match b {
             Value::I32(c) => self.stack.push(if c != 0 { v1 } else { v2 }),
-            _ => unreachable!(),
+            _ => { eprintln!("[WATT] About to panic at interpreter.rs line {}", line!()); panic!("unreachable"); }
         }
 
         Ok(Continue)
@@ -472,7 +472,7 @@ impl<'a> Interpreter<'a> {
         let v = match self.stack.pop().unwrap() {
             Value::I32(c) => Value::I32(self.type_iunary(c, op)),
             Value::I64(c) => Value::I64(self.type_iunary(c, op)),
-            _ => unreachable!(),
+            _ => { eprintln!("[WATT] About to panic at interpreter.rs line {}", line!()); panic!("unreachable"); }
         };
         self.stack.push(v);
         Ok(Continue)
@@ -495,7 +495,7 @@ impl<'a> Interpreter<'a> {
         let v = match self.stack.pop().unwrap() {
             Value::F32(c) => Value::F32(self.type_funary(c, op)),
             Value::F64(c) => Value::F64(self.type_funary(c, op)),
-            _ => unreachable!(),
+            _ => { eprintln!("[WATT] About to panic at interpreter.rs line {}", line!()); panic!("unreachable"); }
         };
         self.stack.push(v);
         Ok(Continue)
@@ -523,7 +523,7 @@ impl<'a> Interpreter<'a> {
         let res = match self.pop2() {
             (Value::I32(c1), Value::I32(c2)) => self.type_ibin(c1, c2, op).map(Value::I32),
             (Value::I64(c1), Value::I64(c2)) => self.type_ibin(c1, c2, op).map(Value::I64),
-            _ => unreachable!(),
+            _ => { eprintln!("[WATT] About to panic at interpreter.rs line {}", line!()); panic!("unreachable"); }
         };
 
         if let Some(v) = res {
@@ -568,7 +568,7 @@ impl<'a> Interpreter<'a> {
         let res = match self.pop2() {
             (Value::F32(c1), Value::F32(c2)) => Value::F32(self.type_fbin(c1, c2, op)),
             (Value::F64(c1), Value::F64(c2)) => Value::F64(self.type_fbin(c1, c2, op)),
-            _ => unreachable!(),
+            _ => { eprintln!("[WATT] About to panic at interpreter.rs line {}", line!()); panic!("unreachable"); }
         };
         self.stack.push(res);
         Ok(Continue)
@@ -595,7 +595,7 @@ impl<'a> Interpreter<'a> {
         let v = match self.stack.pop().unwrap() {
             Value::I32(c) => Value::from_bool(self.type_itest(c, op)),
             Value::I64(c) => Value::from_bool(self.type_itest(c, op)),
-            _ => unreachable!(),
+            _ => { eprintln!("[WATT] About to panic at interpreter.rs line {}", line!()); panic!("unreachable"); }
         };
         self.stack.push(v);
         Ok(Continue)
@@ -617,7 +617,7 @@ impl<'a> Interpreter<'a> {
         let res = match self.pop2() {
             (Value::I32(c1), Value::I32(c2)) => Value::from_bool(self.type_irel(c1, c2, op)),
             (Value::I64(c1), Value::I64(c2)) => Value::from_bool(self.type_irel(c1, c2, op)),
-            _ => unreachable!(),
+            _ => { eprintln!("[WATT] About to panic at interpreter.rs line {}", line!()); panic!("unreachable"); }
         };
         self.stack.push(res);
         Ok(Continue)
@@ -648,7 +648,7 @@ impl<'a> Interpreter<'a> {
         let res = match self.pop2() {
             (Value::F32(c1), Value::F32(c2)) => Value::from_bool(self.type_frel(c1, c2, op)),
             (Value::F64(c1), Value::F64(c2)) => Value::from_bool(self.type_frel(c1, c2, op)),
-            _ => unreachable!(),
+            _ => { eprintln!("[WATT] About to panic at interpreter.rs line {}", line!()); panic!("unreachable"); }
         };
         self.stack.push(res);
         Ok(Continue)
@@ -841,7 +841,7 @@ impl<'a> Interpreter<'a> {
 
                 (&ConvertOp::F32DemoteF64, Value::F64(c)) => Value::F32(c.demote()),
                 (&ConvertOp::F64PromoteF32, Value::F32(c)) => Value::F64(c.promote()),
-                _ => unreachable!(),
+                _ => { eprintln!("[WATT] About to panic at interpreter.rs line {}", line!()); panic!("unreachable"); }
             })
         };
 
@@ -980,7 +980,7 @@ impl<'a> Interpreter<'a> {
         let type_ = &self.frame.module().types[idx as usize];
         let indirect_idx = match self.stack.pop().unwrap() {
             Value::I32(c) => c as usize,
-            _ => unreachable!(),
+            _ => { eprintln!("[WATT] About to panic at interpreter.rs line {}", line!()); panic!("unreachable"); }
         };
 
         if indirect_idx >= tab.elem.len() {
@@ -1028,7 +1028,7 @@ impl<'a> Interpreter<'a> {
     fn grow_memory(&mut self) -> IntResult {
         let new_pages = match self.stack.pop().unwrap() {
             Value::I32(c) => c as usize,
-            _ => unreachable!(),
+            _ => { eprintln!("[WATT] About to panic at interpreter.rs line {}", line!()); panic!("unreachable"); }
         };
         if let Some(old_size) = self.mems.grow(self.frame.module().mem_addrs[0], new_pages) {
             self.stack.push(Value::I32(old_size as u32));
@@ -1046,7 +1046,7 @@ impl<'a> Interpreter<'a> {
         let mem = &self.mems[self.frame.module().mem_addrs[0]];
         let offset = match self.stack.pop().unwrap() {
             Value::I32(c) => c as usize + memop.offset as usize,
-            _ => unreachable!(),
+            _ => { eprintln!("[WATT] About to panic at interpreter.rs line {}", line!()); panic!("unreachable"); }
         };
         let (size_in_bits, signed) = memop.opt.unwrap_or((memop.type_.bit_width(), false));
         let size_in_bytes: usize = (size_in_bits as usize) / 8;
@@ -1101,7 +1101,7 @@ impl<'a> Interpreter<'a> {
             (64, false, Tv::Float(Float::F64)) => Value::F64(f64::from_bits(u64::from_le_bytes([
                 bits[0], bits[1], bits[2], bits[3], bits[4], bits[5], bits[6], bits[7],
             ]))),
-            _ => unreachable!(),
+            _ => { eprintln!("[WATT] About to panic at interpreter.rs line {}", line!()); panic!("unreachable"); }
         };
         self.stack.push(res);
         Ok(Continue)
@@ -1116,7 +1116,7 @@ impl<'a> Interpreter<'a> {
         let c = self.stack.pop().unwrap();
         let offset = match self.stack.pop().unwrap() {
             Value::I32(c) => c as usize + memop.offset as usize,
-            _ => unreachable!(),
+            _ => { eprintln!("[WATT] About to panic at interpreter.rs line {}", line!()); panic!("unreachable"); }
         };
         let size_in_bits = memop.opt.unwrap_or_else(|| memop.type_.bit_width());
         let size_in_bytes: usize = (size_in_bits as usize) / 8;
@@ -1185,7 +1185,7 @@ impl<'a> Interpreter<'a> {
                 bits[6] = b[6];
                 bits[7] = b[7];
             }
-            _ => unreachable!(),
+            _ => { eprintln!("[WATT] About to panic at interpreter.rs line {}", line!()); panic!("unreachable"); }
         };
         Ok(Continue)
     }
