@@ -57,6 +57,7 @@ pub struct StackFrame {
     module: Option<Rc<ModuleInst>>,
     stack_idx: usize, // The size of the stack before pushing args & locals for the Frame
     nested_levels: usize,
+    func_addr: Option<FuncAddr>,  // for call-stack logging
 }
 
 // The stack budget (how many nested levels)
@@ -68,6 +69,7 @@ impl StackFrame {
             module,
             stack_idx: 0,
             nested_levels: STACK_BUDGET,
+            func_addr: None,
         }
     }
 
@@ -78,7 +80,7 @@ impl StackFrame {
         self.module.as_ref().unwrap()
     }
 
-    pub fn push(&self, module: Option<Rc<ModuleInst>>, stack_idx: usize) -> Option<StackFrame> {
+    pub fn push(&self, module: Option<Rc<ModuleInst>>, stack_idx: usize, func_addr: Option<FuncAddr>) -> Option<StackFrame> {
         if self.nested_levels == 0 {
             return None;
         }
@@ -87,6 +89,7 @@ impl StackFrame {
             module,
             stack_idx,
             nested_levels: self.nested_levels - 1,
+            func_addr,
         })
     }
 }
@@ -101,6 +104,7 @@ impl<'a> Interpreter<'a> {
     ) -> Interpreter<'a> {
         Interpreter {
             stack: Vec::new(),
+            call_stack: Vec::new(),
             frame: StackFrame::new(None),
             funcs,
             tables,
@@ -897,7 +901,7 @@ impl<'a> Interpreter<'a> {
         Ok(Continue)
     }
 
-    fn call_module(&mut self, f_inst: &ModuleFuncInst) -> IntResult {
+    fn call_module(&mut self, f_inst: &ModuleFuncInst, f_addr: FuncAddr) -> IntResult {
         // Push locals
         for l in &f_inst.code.locals {
             match *l {
@@ -912,7 +916,7 @@ impl<'a> Interpreter<'a> {
         let frame_begin = self.stack.len() - f_inst.type_.args.len() - f_inst.code.locals.len();
         let new_frame = self
             .frame
-            .push(Some(f_inst.module.clone()), frame_begin)
+            .push(Some(f_inst.module.clone()), frame_begin, Some(f_addr))
             .ok_or(Trap {
                 origin: TrapOrigin::StackOverflow,
             })?;
@@ -921,6 +925,7 @@ impl<'a> Interpreter<'a> {
         let old_frame = mem::replace(&mut self.frame, new_frame);
         self.block(&f_inst.type_.result, &f_inst.code.body)?;
         self.frame = old_frame;
+        self.call_stack.pop();
 
         // Remove locals/args
         let drain_start = frame_begin;
@@ -930,6 +935,9 @@ impl<'a> Interpreter<'a> {
     }
 
     fn call_host(&mut self, f_inst: &HostFuncInst) -> IntResult {
+        let addrs: Vec<usize> = self.call_stack.iter().map(|a| a.0).collect();
+        let caller = self.frame.func_addr.map(|a| a.0);
+        eprintln!("[WATT] call_host stack (func indices): {:?} caller={:?}", addrs, caller); { use std::io::Write; let _ = std::io::stderr().flush(); }
         eprintln!("[WATT TRACE] call_host entry"); { use std::io::Write; let _ = std::io::stderr().flush(); }
         /*
         let stack_before_call = self.stack.len();
@@ -971,11 +979,13 @@ impl<'a> Interpreter<'a> {
 
     /// Call a function directly
     pub fn call(&mut self, f_addr: FuncAddr) -> IntResult {
-        // Idea: the new stack_idx is the base frame pointer, which point to the
-        // first argument of the called function. When calling call, all
-        // arguments should already be on the stack (thanks to validation).
+        if self.frame.module.is_some() {
+            if let Some(addr) = self.frame.func_addr {
+                self.call_stack.push(addr);
+            }
+        }
         match self.funcs[f_addr] {
-            FuncInst::Module(ref f_inst) => self.call_module(f_inst)?,
+            FuncInst::Module(ref f_inst) => self.call_module(f_inst, f_addr)?,
             FuncInst::Host(ref f_inst) => self.call_host(f_inst)?,
         };
 
