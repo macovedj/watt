@@ -149,97 +149,16 @@ fn mk_host_func(import: Import, store: &mut Store) -> ExternVal {
     if module == "watt-0.5" || module == "watt-0.4" {
         let hostfunc = import::host_func(name, store);
         ExternVal::Func(alloc_func(store, func, hostfunc))
-    } else if module == "wasi_snapshot_preview1" {
-        // WASI stubs for wasm32-wasip1 compiled proc-macros
+    } else {
+        // WASI/unknown: generic stub (return 0), keep logging
+        let module_owned = module.to_string();
         let name_owned = name.to_string();
+        eprintln!("[WATT] Stubbing unknown import: {}::{}", module_owned, name_owned);
         let hostfunc: HostFunc = Box::new(move |interp| {
-            eprintln!("[WATT WASI STUB] wasi_snapshot_preview1::{} (stack depth: {})", name_owned, interp.stack.len());
-            match name_owned.as_str() {
-                "proc_exit" => {
-                    // proc_exit should halt execution - return a trap
-                    let exit_code = interp.pop().map(|v| match v {
-                        Value::I32(code) => code as i32,
-                        _ => 0,
-                    }).unwrap_or(0);
-                    return Some(format!("proc_exit called with code {}", exit_code));
-                }
-                "random_get" => {
-                    // random_get(buf: i32, buf_len: i32) -> errno
-                    // Pop arguments in reverse order
-                    let buf_len = match interp.pop() {
-                        Some(Value::I32(v)) => v as usize,
-                        _ => 0,
-                    };
-                    let buf_ptr = match interp.pop() {
-                        Some(Value::I32(v)) => v as usize,
-                        _ => 0,
-                    };
-                    // Write pseudo-random bytes to buffer
-                    let mem = interp.get_memory_mut();
-                    if buf_ptr + buf_len <= mem.len() {
-                        // Use a simple deterministic pattern for "randomness"
-                        // This is fine for proc macros that just need some entropy
-                        for i in 0..buf_len {
-                            mem[buf_ptr + i] = ((buf_ptr + i) * 31 + 17) as u8;
-                        }
-                    }
-                    interp.push(Value::I32(0)); eprintln!("[WATT WASI DEBUG] After push, stack depth: {}", interp.stack.len()); { use std::io::Write; let _ = std::io::stderr().flush(); } // Success
-                }
-                "environ_sizes_get" => {
-                    // environ_sizes_get(environ_count: *mut size, environ_buf_size: *mut size) -> errno
-                    // Pop pointers and write 0 to both (no environment variables)
-                    let buf_size_ptr = match interp.pop() {
-                        Some(Value::I32(v)) => v as usize,
-                        _ => 0,
-                    };
-                    let count_ptr = match interp.pop() {
-                        Some(Value::I32(v)) => v as usize,
-                        _ => 0,
-                    };
-                    let mem = interp.get_memory_mut();
-                    // Write 0 as u32 (little-endian) for count
-                    if count_ptr + 4 <= mem.len() {
-                        mem[count_ptr..count_ptr + 4].copy_from_slice(&0u32.to_le_bytes());
-                    }
-                    // Write 0 as u32 (little-endian) for buf_size
-                    if buf_size_ptr + 4 <= mem.len() {
-                        mem[buf_size_ptr..buf_size_ptr + 4].copy_from_slice(&0u32.to_le_bytes());
-                    }
-                    interp.push(Value::I32(0)); eprintln!("[WATT WASI DEBUG] After push, stack depth: {}", interp.stack.len()); { use std::io::Write; let _ = std::io::stderr().flush(); } // Success
-                }
-                "environ_get" => {
-                    // environ_get(environ: *mut *mut u8, environ_buf: *mut u8) -> errno
-                    // We have 0 env vars, so just return success without writing
-                    let _environ_buf = interp.pop();
-                    let _environ = interp.pop();
-                    interp.push(Value::I32(0)); eprintln!("[WATT WASI DEBUG] After push, stack depth: {}", interp.stack.len()); { use std::io::Write; let _ = std::io::stderr().flush(); } // Success
-                }
-                "fd_write" => {
-                    // fd_write(fd: fd, iovs: *const ciovec, iovs_len: size, nwritten: *mut size) -> errno
-                    let nwritten_ptr = match interp.pop() {
-                        Some(Value::I32(v)) => v as usize,
-                        _ => 0,
-                    };
-                    let _iovs_len = interp.pop();
-                    let _iovs = interp.pop();
-                    let _fd = interp.pop();
-                    // Write 0 bytes written
-                    let mem = interp.get_memory_mut();
-                    if nwritten_ptr + 4 <= mem.len() {
-                        mem[nwritten_ptr..nwritten_ptr + 4].copy_from_slice(&0u32.to_le_bytes());
-                    }
-                    interp.push(Value::I32(0)); eprintln!("[WATT WASI DEBUG] After push, stack depth: {}", interp.stack.len()); { use std::io::Write; let _ = std::io::stderr().flush(); } // Success
-                }
-                _ => {
-                    // Default: return 0 (success)
-                    interp.push(Value::I32(0));
-                }
-            }
+            interp.push(Value::I32(0));
             None
         });
         ExternVal::Func(alloc_func(store, func, hostfunc))
-    } else {
-        panic!("Wasm import from unknown module: {}", module);
     }
 }
 
