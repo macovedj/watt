@@ -7,8 +7,15 @@ use std::marker::PhantomData;
 use std::str;
 
 pub fn decode(mut buf: &[u8]) -> TokenStream {
+    println!("decode called haha");
+    // Fail fast with a clear message instead of a generic slice/index panic later
+    if buf.is_empty() {
+        panic!("watt decode: empty buffer (no token stream bytes)");
+    }
     let ret = TokenStream::decode(&mut buf);
-    assert!(buf.is_empty());
+    if !buf.is_empty() {
+        panic!("watt decode: {} bytes remaining after TokenStream::decode (format mismatch?)", buf.len());
+    }
     ret
 }
 
@@ -31,6 +38,7 @@ fn str<'a>(data: &mut &'a [u8]) -> &'a str {
 
 impl Decode for TokenStream {
     fn decode(data: &mut &[u8]) -> Self {
+        println!("tokenstream decode");
         let mut tokens = Vec::new();
         loop {
             match byte(data) {
@@ -99,10 +107,15 @@ impl Decode for u32 {
 
 impl Decode for Ident {
     fn decode(data: &mut &[u8]) -> Self {
+        println!("ident decode");
         let span = Span::decode(data);
         let name = str(data);
         if name.starts_with("r#") {
-            Ident::new_raw(&name[2..], span)
+            let rest = &name[2..];
+            if rest.is_empty() {
+                panic!("watt decode: raw ident has empty name (wire sent \"r#\")");
+            }
+            Ident::new_raw(rest, span)
         } else {
             Ident::new(name, span)
         }

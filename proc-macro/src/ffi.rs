@@ -36,6 +36,7 @@ fn panic_hook(panic: &PanicHookInfo) {
 
 #[no_mangle]
 pub extern "C" fn raw_to_token_stream(raw: u32) -> TokenStream {
+    println!("raw token stream");
     set_wasm_panic_hook();
     let bytes = unsafe {
         let handle = token_stream_serialize(raw);
@@ -45,6 +46,10 @@ pub extern "C" fn raw_to_token_stream(raw: u32) -> TokenStream {
         bytes_read(handle, ret.as_mut_ptr());
         ret
     };
+    // Early check at the boundary: catch empty or obviously bad length before decode
+    if bytes.is_empty() {
+        panic!("watt raw_to_token_stream: host returned 0 bytes (stream handle {})", raw);
+    }
     decode::decode(&bytes)
 }
 
