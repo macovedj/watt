@@ -9,6 +9,7 @@ use std::rc::Rc;
 /// A struct storing the state of the current interpreted
 pub struct Interpreter<'a> {
     pub stack: Vec<Value>,
+    call_stack: Vec<FuncAddr>,
 
     frame: StackFrame,
 
@@ -240,10 +241,19 @@ impl<'a> Interpreter<'a> {
                     });
                 }
                 
-                // Copy memory (handle overlapping regions)
-                for i in 0..size {
-                    let byte = mem.data[src + i];
-                    mem.data[dest + i] = byte;
+                // Copy memory handling overlapping regions (memmove semantics per WASM spec)
+                if dest <= src || dest >= src + size {
+                    // Non-overlapping or dest before src: forward copy is safe
+                    for i in 0..size {
+                        let byte = mem.data[src + i];
+                        mem.data[dest + i] = byte;
+                    }
+                } else {
+                    // Overlapping with dest > src: copy backward to avoid clobbering
+                    for i in (0..size).rev() {
+                        let byte = mem.data[src + i];
+                        mem.data[dest + i] = byte;
+                    }
                 }
                 
                 Ok(Continue)
@@ -935,9 +945,7 @@ impl<'a> Interpreter<'a> {
     }
 
     fn call_host(&mut self, f_inst: &HostFuncInst) -> IntResult {
-        let addrs: Vec<usize> = self.call_stack.iter().map(|a| a.0).collect();
-        let caller = self.frame.func_addr.map(|a| a.0);
-        eprintln!("[WATT] call_host stack (func indices): {:?} caller={:?}", addrs, caller); { use std::io::Write; let _ = std::io::stderr().flush(); }
+        eprintln!("[WATT] call_host stack (func indices): {:?} caller={:?}", self.call_stack, self.frame.func_addr); { use std::io::Write; let _ = std::io::stderr().flush(); }
         eprintln!("[WATT TRACE] call_host entry"); { use std::io::Write; let _ = std::io::stderr().flush(); }
         /*
         let stack_before_call = self.stack.len();

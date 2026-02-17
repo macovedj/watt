@@ -150,12 +150,22 @@ fn mk_host_func(import: Import, store: &mut Store) -> ExternVal {
         let hostfunc = import::host_func(name, store);
         ExternVal::Func(alloc_func(store, func, hostfunc))
     } else {
-        // WASI/unknown: generic stub (return 0), keep logging
+        // WASI/unknown: stub that properly pops args and pushes return values.
+        // Without popping args, the interpreter value stack gets corrupted.
+        let num_args = func.args.len();
+        let num_results = func.result.len();
         let module_owned = module.to_string();
         let name_owned = name.to_string();
-        eprintln!("[WATT] Stubbing unknown import: {}::{}", module_owned, name_owned);
+        eprintln!("[WATT] Stubbing unknown import: {}::{} (args={}, results={})", module_owned, name_owned, num_args, num_results);
         let hostfunc: HostFunc = Box::new(move |interp| {
-            interp.push(Value::I32(0));
+            // Pop all arguments (host functions must manage their own stack)
+            for _ in 0..num_args {
+                interp.pop();
+            }
+            // Push default return values (0 for each result)
+            for _ in 0..num_results {
+                interp.push(Value::I32(0));
+            }
             None
         });
         ExternVal::Func(alloc_func(store, func, hostfunc))
