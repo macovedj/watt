@@ -150,24 +150,105 @@ fn mk_host_func(import: Import, store: &mut Store) -> ExternVal {
         let hostfunc = import::host_func(name, store);
         ExternVal::Func(alloc_func(store, func, hostfunc))
     } else {
-        // WASI/unknown: stub that properly pops args and pushes return values.
-        // Without popping args, the interpreter value stack gets corrupted.
+        // WASI/unknown: function-specific stubs that properly handle output pointers.
         let num_args = func.args.len();
         let num_results = func.result.len();
         let module_owned = module.to_string();
         let name_owned = name.to_string();
         eprintln!("[WATT] Stubbing unknown import: {}::{} (args={}, results={})", module_owned, name_owned, num_args, num_results);
-        let hostfunc: HostFunc = Box::new(move |interp| {
-            // Pop all arguments (host functions must manage their own stack)
-            for _ in 0..num_args {
-                interp.pop();
+
+        let hostfunc: HostFunc = match name {
+            "environ_sizes_get" => {
+                // environ_sizes_get(count_ptr: i32, buf_size_ptr: i32) -> errno
+                // Write 0 to both output pointers (no environment variables)
+                Box::new(move |interp| {
+                    let buf_size_ptr = match interp.pop().unwrap() { Value::I32(v) => v as usize, _ => 0 };
+                    let count_ptr = match interp.pop().unwrap() { Value::I32(v) => v as usize, _ => 0 };
+                    let mem = interp.get_memory_mut();
+                    if count_ptr + 4 <= mem.len() {
+                        mem[count_ptr..count_ptr+4].copy_from_slice(&0u32.to_le_bytes());
+                    }
+                    if buf_size_ptr + 4 <= mem.len() {
+                        mem[buf_size_ptr..buf_size_ptr+4].copy_from_slice(&0u32.to_le_bytes());
+                    }
+                    interp.push(Value::I32(0));
+                    None
+                })
             }
-            // Push default return values (0 for each result)
-            for _ in 0..num_results {
-                interp.push(Value::I32(0));
+            "environ_get" => {
+                // environ_get(environ_ptr, environ_buf_ptr) -> errno
+                // No-op since we report 0 environment variables
+                Box::new(move |interp| {
+                    interp.pop(); // environ_buf_ptr
+                    interp.pop(); // environ_ptr
+                    interp.push(Value::I32(0));
+                    None
+                })
             }
-            None
-        });
+            "fd_write" => {
+                // fd_write(fd, iovs_ptr, iovs_len, nwritten_ptr) -> errno
+                // Calculate total bytes from iovecs and write to nwritten_ptr
+                Box::new(move |interp| {
+                    let nwritten_ptr = match interp.pop().unwrap() { Value::I32(v) => v as usize, _ => 0 };
+                    let iovs_len = match interp.pop().unwrap() { Value::I32(v) => v as usize, _ => 0 };
+                    let iovs_ptr = match interp.pop().unwrap() { Value::I32(v) => v as usize, _ => 0 };
+                    interp.pop(); // fd
+                    let mem = interp.get_memory_mut();
+                    let mut total: u32 = 0;
+                    for i in 0..iovs_len {
+                        let iov_base = iovs_ptr + i * 8;
+                        if iov_base + 8 <= mem.len() {
+                            let len = u32::from_le_bytes([
+                                mem[iov_base + 4], mem[iov_base + 5],
+                                mem[iov_base + 6], mem[iov_base + 7],
+                            ]);
+                            total = total.saturating_add(len);
+                        }
+                    }
+                    if nwritten_ptr + 4 <= mem.len() {
+                        mem[nwritten_ptr..nwritten_ptr+4].copy_from_slice(&total.to_le_bytes());
+                    }
+                    interp.push(Value::I32(0));
+                    None
+                })
+            }
+            "random_get" => {
+                // random_get(buf_ptr, buf_len) -> errno
+                // Fill buffer with zeros (deterministic)
+                Box::new(move |interp| {
+                    let buf_len = match interp.pop().unwrap() { Value::I32(v) => v as usize, _ => 0 };
+                    let buf_ptr = match interp.pop().unwrap() { Value::I32(v) => v as usize, _ => 0 };
+                    let mem = interp.get_memory_mut();
+                    let end = std::cmp::min(buf_ptr + buf_len, mem.len());
+                    for i in buf_ptr..end {
+                        mem[i] = 0;
+                    }
+                    interp.push(Value::I32(0));
+                    None
+                })
+            }
+            "proc_exit" => {
+                // proc_exit(code) -> ()
+                // Return an error to halt the interpreter
+                Box::new(move |interp| {
+                    let code = match interp.pop().unwrap() { Value::I32(v) => v, _ => 0 };
+                    eprintln!("[WATT] proc_exit called with code {}", code);
+                    Some(format!("proc_exit({})", code))
+                })
+            }
+            _ => {
+                // Generic fallback for truly unknown functions
+                Box::new(move |interp| {
+                    for _ in 0..num_args {
+                        interp.pop();
+                    }
+                    for _ in 0..num_results {
+                        interp.push(Value::I32(0));
+                    }
+                    None
+                })
+            }
+        };
         ExternVal::Func(alloc_func(store, func, hostfunc))
     }
 }
