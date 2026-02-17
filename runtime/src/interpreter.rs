@@ -490,7 +490,24 @@ impl<'a> Interpreter<'a> {
 
     /// Dispatch an IUnop
     fn iunary(&mut self, _t: types::Int, op: &IUnOp) -> IntResult {
-        // Validation should assert that the top of the stack exists and has the type t
+        // Handle sign extension ops specially (they need type-aware casts)
+        match *op {
+            IUnOp::Extend8S | IUnOp::Extend16S | IUnOp::Extend32S => {
+                let v = self.stack.pop().unwrap();
+                let result = match (&v, op) {
+                    (Value::I32(n), IUnOp::Extend8S) => Value::I32((*n as i8) as i32 as u32),
+                    (Value::I32(n), IUnOp::Extend16S) => Value::I32((*n as i16) as i32 as u32),
+                    (Value::I64(n), IUnOp::Extend8S) => Value::I64((*n as i8) as i64 as u64),
+                    (Value::I64(n), IUnOp::Extend16S) => Value::I64((*n as i16) as i64 as u64),
+                    (Value::I64(n), IUnOp::Extend32S) => Value::I64((*n as i32) as i64 as u64),
+                    _ => { eprintln!("[WATT] invalid sign extension op for type"); panic!("invalid sign extension"); }
+                };
+                self.stack.push(result);
+                return Ok(Continue);
+            }
+            _ => {}
+        }
+        // Standard integer unary ops (Clz, Ctz, Popcnt)
         let v = match self.stack.pop().unwrap() {
             Value::I32(c) => Value::I32(self.type_iunary(c, op)),
             Value::I64(c) => Value::I64(self.type_iunary(c, op)),

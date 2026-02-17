@@ -5,6 +5,9 @@ pub enum IUnOp {
     Clz,
     Ctz,
     Popcnt,
+    Extend8S,
+    Extend16S,
+    Extend32S,
 }
 
 #[derive(Debug)]

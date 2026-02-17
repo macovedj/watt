@@ -556,14 +556,22 @@ impl<R: Read> Decoder<R> {
                 to: Float(F64),
             }),
 
-            // Reference types proposal instructions
-            0xc0 => {
+            // Sign extension operators (standard since WASM 1.0+)
+            0xc0 => IUnary(Int(I32), IUnOp::Extend8S),
+            0xc1 => IUnary(Int(I32), IUnOp::Extend16S),
+            0xc2 => IUnary(Int(I64), IUnOp::Extend8S),
+            0xc3 => IUnary(Int(I64), IUnOp::Extend16S),
+            0xc4 => IUnary(Int(I64), IUnOp::Extend32S),
+
+            // Reference types proposal instructions (0xD0-0xD2)
+            0xd0 => {
+                let _reftype = self.read_byte()?;
                 RefNull
             }
-            0xc1 => {
+            0xd1 => {
                 RefIsNull
             }
-            0xc2 => {
+            0xd2 => {
                 let func_index = self.read_index()?;
                 RefFunc(func_index)
             }
