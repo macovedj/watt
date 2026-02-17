@@ -525,6 +525,7 @@ impl<'a> Interpreter<'a> {
             IUnOp::Clz => v.leading_zeros(),
             IUnOp::Ctz => v.trailing_zeros(),
             IUnOp::Popcnt => v.count_ones(),
+            _ => unreachable!("sign extension ops handled in iunary()"),
         }
     }
 

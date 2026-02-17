@@ -557,11 +557,11 @@ impl<R: Read> Decoder<R> {
             }),
 
             // Sign extension operators (standard since WASM 1.0+)
-            0xc0 => IUnary(Int(I32), IUnOp::Extend8S),
-            0xc1 => IUnary(Int(I32), IUnOp::Extend16S),
-            0xc2 => IUnary(Int(I64), IUnOp::Extend8S),
-            0xc3 => IUnary(Int(I64), IUnOp::Extend16S),
-            0xc4 => IUnary(Int(I64), IUnOp::Extend32S),
+            0xc0 => IUnary(I32, IUnOp::Extend8S),
+            0xc1 => IUnary(I32, IUnOp::Extend16S),
+            0xc2 => IUnary(I64, IUnOp::Extend8S),
+            0xc3 => IUnary(I64, IUnOp::Extend16S),
+            0xc4 => IUnary(I64, IUnOp::Extend32S),
 
             // Reference types proposal instructions (0xD0-0xD2)
             0xd0 => {
