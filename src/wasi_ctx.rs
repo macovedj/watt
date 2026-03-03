@@ -1,5 +1,6 @@
 use std::cell::RefCell;
 use std::fs::{File, OpenOptions};
+use std::hash::{BuildHasher, Hasher};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Component, Path, PathBuf};
 
@@ -18,6 +19,7 @@ const FILETYPE_DIRECTORY: u8 = 3;
 const FILETYPE_REGULAR_FILE: u8 = 4;
 
 const PREOPENS_ENV: &str = "RUSTC_WATT_PREOPENS";
+const DETERMINISTIC_RANDOM_ENV: &str = "RUSTC_WATT_DETERMINISTIC_RANDOM";
 const RIGHTS_FD_WRITE: u64 = 1u64 << 6;
 
 #[derive(Clone, Debug)]
@@ -37,11 +39,26 @@ enum FdEntry {
 
 #[derive(Debug)]
 struct WasiProcMacroCtx {
+    args_entries: Vec<Vec<u8>>,
     env_entries: Vec<Vec<u8>>,
     stdout_capture: Vec<u8>,
     stderr_capture: Vec<u8>,
     mirror_stdio: bool,
+    deterministic_random: bool,
+    random_state: std::collections::hash_map::RandomState,
+    random_counter: u64,
     fds: Vec<Option<FdEntry>>,
+}
+
+fn collect_args_entries() -> Vec<Vec<u8>> {
+    let mut args_entries = Vec::new();
+    for arg in std::env::args_os() {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(arg.to_string_lossy().as_bytes());
+        bytes.push(0);
+        args_entries.push(bytes);
+    }
+    args_entries
 }
 
 fn collect_env_entries() -> Vec<Vec<u8>> {
@@ -93,7 +110,9 @@ fn preopens_from_host() -> Vec<PreopenDir> {
     if out.is_empty() {
         if let Ok(cwd) = std::env::current_dir() {
             if let Some(canon) = canonicalize_dir(&cwd) {
-                out.push(PreopenDir { root: canon, writable: false });
+                // Match native-like proc-macro behavior as closely as possible:
+                // default cwd preopen is writable unless caller narrows policy.
+                out.push(PreopenDir { root: canon, writable: true });
             }
         }
     }
@@ -108,10 +127,16 @@ impl WasiProcMacroCtx {
         }
 
         Self {
+            args_entries: collect_args_entries(),
             env_entries: collect_env_entries(),
             stdout_capture: Vec::new(),
             stderr_capture: Vec::new(),
             mirror_stdio: true,
+            deterministic_random: std::env::var(DETERMINISTIC_RANDOM_ENV)
+                .ok()
+                .is_some_and(|v| v == "1" || v.eq_ignore_ascii_case("true")),
+            random_state: std::collections::hash_map::RandomState::new(),
+            random_counter: 0,
             fds,
         }
     }
@@ -191,6 +216,31 @@ pub(crate) fn reset_from_host() {
 
 pub(crate) fn environ_entries() -> Vec<Vec<u8>> {
     CTX.with(|ctx| ctx.borrow().env_entries.clone())
+}
+
+pub(crate) fn args_entries() -> Vec<Vec<u8>> {
+    CTX.with(|ctx| ctx.borrow().args_entries.clone())
+}
+
+pub(crate) fn random_fill(out: &mut [u8]) {
+    CTX.with(|ctx| {
+        let mut ctx = ctx.borrow_mut();
+        if ctx.deterministic_random {
+            out.fill(0);
+            return;
+        }
+
+        let mut i = 0usize;
+        while i < out.len() {
+            let mut hasher = ctx.random_state.build_hasher();
+            hasher.write_u64(ctx.random_counter);
+            ctx.random_counter = ctx.random_counter.wrapping_add(1);
+            let block = hasher.finish().to_le_bytes();
+            let n = std::cmp::min(block.len(), out.len() - i);
+            out[i..i + n].copy_from_slice(&block[..n]);
+            i += n;
+        }
+    });
 }
 
 pub(crate) fn write_stdout(bytes: &[u8]) -> io::Result<()> {
@@ -396,10 +446,14 @@ pub(crate) fn set_for_test(env_entries: Vec<Vec<u8>>, mirror_stdio: bool) {
             }
         }
         *ctx.borrow_mut() = WasiProcMacroCtx {
+            args_entries: Vec::new(),
             env_entries,
             stdout_capture: Vec::new(),
             stderr_capture: Vec::new(),
             mirror_stdio,
+            deterministic_random: false,
+            random_state: std::collections::hash_map::RandomState::new(),
+            random_counter: 0,
             fds,
         };
     });
@@ -419,10 +473,42 @@ pub(crate) fn set_for_test_with_preopens(
             }
         }
         *ctx.borrow_mut() = WasiProcMacroCtx {
+            args_entries: Vec::new(),
             env_entries,
             stdout_capture: Vec::new(),
             stderr_capture: Vec::new(),
             mirror_stdio,
+            deterministic_random: false,
+            random_state: std::collections::hash_map::RandomState::new(),
+            random_counter: 0,
+            fds,
+        };
+    });
+}
+
+#[cfg(test)]
+pub(crate) fn set_for_test_full(
+    args_entries: Vec<Vec<u8>>,
+    env_entries: Vec<Vec<u8>>,
+    mirror_stdio: bool,
+    deterministic_random: bool,
+) {
+    CTX.with(|ctx| {
+        let mut fds = vec![Some(FdEntry::Stdin), Some(FdEntry::Stdout), Some(FdEntry::Stderr)];
+        if let Ok(cwd) = std::env::current_dir() {
+            if let Some(canon) = canonicalize_dir(&cwd) {
+                fds.push(Some(FdEntry::PreopenDir(PreopenDir { root: canon, writable: true })));
+            }
+        }
+        *ctx.borrow_mut() = WasiProcMacroCtx {
+            args_entries,
+            env_entries,
+            stdout_capture: Vec::new(),
+            stderr_capture: Vec::new(),
+            mirror_stdio,
+            deterministic_random,
+            random_state: std::collections::hash_map::RandomState::new(),
+            random_counter: 0,
             fds,
         };
     });
@@ -468,10 +554,14 @@ mod tests {
         std::fs::write(&file, b"abc").unwrap();
 
         let mut ctx = WasiProcMacroCtx {
+            args_entries: Vec::new(),
             env_entries: Vec::new(),
             stdout_capture: Vec::new(),
             stderr_capture: Vec::new(),
             mirror_stdio: false,
+            deterministic_random: false,
+            random_state: std::collections::hash_map::RandomState::new(),
+            random_counter: 0,
             fds: vec![
                 Some(FdEntry::Stdin),
                 Some(FdEntry::Stdout),
@@ -526,5 +616,20 @@ mod tests {
 
         let data = std::fs::read(out).unwrap();
         assert_eq!(data, b"hello wasm");
+    }
+
+    #[test]
+    fn default_fallback_preopen_is_writable() {
+        let preopens = preopens_from_host();
+        assert!(!preopens.is_empty());
+        assert!(preopens[0].writable);
+    }
+
+    #[test]
+    fn random_fill_deterministic_override() {
+        set_for_test_full(Vec::new(), Vec::new(), false, true);
+        let mut out = [1u8; 16];
+        random_fill(&mut out);
+        assert_eq!(&out, &[0u8; 16]);
     }
 }

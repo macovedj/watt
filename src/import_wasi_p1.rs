@@ -42,8 +42,11 @@ fn write_u32(memory: &mut [u8], ptr: usize, value: u32) -> bool {
 fn wasi_args_sizes_get(interp: &mut crate::runtime::Interpreter<'_>) -> Option<String> {
     let buf_size_ptr = pop_u32(interp)? as usize;
     let count_ptr = pop_u32(interp)? as usize;
+    let args = wasi_ctx::args_entries();
+    let args_count = args.len() as u32;
+    let args_buf_size = args.iter().map(|entry| entry.len() as u32).sum::<u32>();
     let memory = interp.get_memory_mut();
-    if !write_u32(memory, count_ptr, 0) || !write_u32(memory, buf_size_ptr, 0) {
+    if !write_u32(memory, count_ptr, args_count) || !write_u32(memory, buf_size_ptr, args_buf_size) {
         interp.push(Value::I32(wasi_ctx::ERRNO_FAULT as u32));
         return None;
     }
@@ -52,8 +55,25 @@ fn wasi_args_sizes_get(interp: &mut crate::runtime::Interpreter<'_>) -> Option<S
 }
 
 fn wasi_args_get(interp: &mut crate::runtime::Interpreter<'_>) -> Option<String> {
-    let _argv_buf = pop_u32(interp)?;
-    let _argv_ptrs = pop_u32(interp)?;
+    let argv_buf_ptr = pop_u32(interp)? as usize;
+    let argv_ptrs_ptr = pop_u32(interp)? as usize;
+    let args = wasi_ctx::args_entries();
+    let memory = interp.get_memory_mut();
+    let mut write_ptr = argv_buf_ptr;
+    for (idx, entry) in args.iter().enumerate() {
+        let ptr_slot = argv_ptrs_ptr.saturating_add(idx * 4);
+        if !write_u32(memory, ptr_slot, write_ptr as u32) {
+            interp.push(Value::I32(wasi_ctx::ERRNO_FAULT as u32));
+            return None;
+        }
+        let end = write_ptr.saturating_add(entry.len());
+        if end > memory.len() {
+            interp.push(Value::I32(wasi_ctx::ERRNO_FAULT as u32));
+            return None;
+        }
+        memory[write_ptr..end].copy_from_slice(entry);
+        write_ptr = end;
+    }
     interp.push(Value::I32(wasi_ctx::ERRNO_SUCCESS as u32));
     None
 }
@@ -169,7 +189,7 @@ fn wasi_random_get(interp: &mut crate::runtime::Interpreter<'_>) -> Option<Strin
         interp.push(Value::I32(wasi_ctx::ERRNO_FAULT as u32));
         return None;
     }
-    memory[buf_ptr..end].fill(0);
+    wasi_ctx::random_fill(&mut memory[buf_ptr..end]);
     interp.push(Value::I32(wasi_ctx::ERRNO_SUCCESS as u32));
     None
 }
@@ -597,5 +617,13 @@ mod tests {
         assert!(wasi_ctx::write_stdout(b"hello").is_ok());
         assert_eq!(wasi_ctx::captured_stdout(), b"hello");
         assert!(wasi_ctx::captured_stderr().is_empty());
+    }
+
+    #[test]
+    fn args_sizes_and_get_use_runtime_context() {
+        let args = vec![b"rustc\0".to_vec(), b"--crate-name\0".to_vec()];
+        wasi_ctx::set_for_test_full(args.clone(), Vec::new(), false, false);
+        let got = wasi_ctx::args_entries();
+        assert_eq!(got, args);
     }
 }
