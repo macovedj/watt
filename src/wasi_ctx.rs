@@ -406,6 +406,29 @@ pub(crate) fn set_for_test(env_entries: Vec<Vec<u8>>, mirror_stdio: bool) {
 }
 
 #[cfg(test)]
+pub(crate) fn set_for_test_with_preopens(
+    env_entries: Vec<Vec<u8>>,
+    mirror_stdio: bool,
+    preopens: Vec<(PathBuf, bool)>,
+) {
+    CTX.with(|ctx| {
+        let mut fds = vec![Some(FdEntry::Stdin), Some(FdEntry::Stdout), Some(FdEntry::Stderr)];
+        for (root, writable) in preopens {
+            if let Some(canon) = canonicalize_dir(&root) {
+                fds.push(Some(FdEntry::PreopenDir(PreopenDir { root: canon, writable })));
+            }
+        }
+        *ctx.borrow_mut() = WasiProcMacroCtx {
+            env_entries,
+            stdout_capture: Vec::new(),
+            stderr_capture: Vec::new(),
+            mirror_stdio,
+            fds,
+        };
+    });
+}
+
+#[cfg(test)]
 pub(crate) fn captured_stdout() -> Vec<u8> {
     CTX.with(|ctx| ctx.borrow().stdout_capture.clone())
 }
@@ -472,5 +495,36 @@ mod tests {
         };
         assert!(read_fd >= 4);
         assert!(matches!(ctx.fd_entry(read_fd).unwrap(), FdEntry::OpenFile { writable: false, .. }));
+    }
+
+    #[test]
+    fn path_open_denies_parent_traversal() {
+        let dir = mk_tmp_dir();
+        set_for_test_with_preopens(Vec::new(), false, vec![(dir.clone(), false)]);
+        let err = path_open(3, b"../escape.txt", 0, 0, 0).unwrap_err();
+        assert_eq!(err, ERRNO_PERM);
+    }
+
+    #[test]
+    fn read_only_preopen_denies_write_open() {
+        let dir = mk_tmp_dir();
+        set_for_test_with_preopens(Vec::new(), false, vec![(dir.clone(), false)]);
+        let err = path_open(3, b"new.txt", 0x1, 0, RIGHTS_FD_WRITE).unwrap_err();
+        assert_eq!(err, ERRNO_PERM);
+    }
+
+    #[test]
+    fn writable_preopen_allows_write_open_and_write() {
+        let dir = mk_tmp_dir();
+        let out = dir.join("out.txt");
+        set_for_test_with_preopens(Vec::new(), false, vec![(dir.clone(), true)]);
+
+        let fd = path_open(3, b"out.txt", 0x1, 0, RIGHTS_FD_WRITE).unwrap();
+        let wrote = fd_write(fd, &[b"hello".to_vec(), b" wasm".to_vec()]).unwrap();
+        assert_eq!(wrote, 10);
+        fd_close(fd).unwrap();
+
+        let data = std::fs::read(out).unwrap();
+        assert_eq!(data, b"hello wasm");
     }
 }
