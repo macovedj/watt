@@ -3,6 +3,9 @@ use std::fs::{File, OpenOptions};
 use std::hash::{BuildHasher, Hasher};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Component, Path, PathBuf};
+use std::sync::{OnceLock, RwLock};
+
+use crate::WasiPolicy;
 
 pub const ERRNO_SUCCESS: i32 = 0;
 pub const ERRNO_BADF: i32 = 8;
@@ -119,22 +122,63 @@ fn preopens_from_host() -> Vec<PreopenDir> {
     out
 }
 
+fn preopens_from_policy(policy: &WasiPolicy) -> Vec<PreopenDir> {
+    let mut out = Vec::new();
+    for entry in &policy.preopens {
+        if let Some(canon) = canonicalize_dir(&entry.path) {
+            out.push(PreopenDir { root: canon, writable: entry.writable });
+        }
+    }
+    out
+}
+
+fn policy_cell() -> &'static RwLock<Option<WasiPolicy>> {
+    static CELL: OnceLock<RwLock<Option<WasiPolicy>>> = OnceLock::new();
+    CELL.get_or_init(|| RwLock::new(None))
+}
+
+fn active_policy() -> Option<WasiPolicy> {
+    policy_cell()
+        .read()
+        .ok()
+        .and_then(|guard| guard.clone())
+}
+
 impl WasiProcMacroCtx {
     fn from_host() -> Self {
+        let policy = active_policy();
         let mut fds = vec![Some(FdEntry::Stdin), Some(FdEntry::Stdout), Some(FdEntry::Stderr)];
-        for dir in preopens_from_host() {
+        let preopens = if let Some(policy) = &policy {
+            preopens_from_policy(policy)
+        } else {
+            preopens_from_host()
+        };
+        for dir in preopens {
             fds.push(Some(FdEntry::PreopenDir(dir)));
         }
 
         Self {
-            args_entries: collect_args_entries(),
-            env_entries: collect_env_entries(),
+            args_entries: if policy.as_ref().is_none_or(|p| p.inherit_args) {
+                collect_args_entries()
+            } else {
+                Vec::new()
+            },
+            env_entries: if policy.as_ref().is_none_or(|p| p.inherit_env) {
+                collect_env_entries()
+            } else {
+                Vec::new()
+            },
             stdout_capture: Vec::new(),
             stderr_capture: Vec::new(),
-            mirror_stdio: true,
-            deterministic_random: std::env::var(DETERMINISTIC_RANDOM_ENV)
-                .ok()
-                .is_some_and(|v| v == "1" || v.eq_ignore_ascii_case("true")),
+            mirror_stdio: policy.as_ref().map_or(true, |p| p.mirror_stdio),
+            deterministic_random: policy.as_ref().map_or_else(
+                || {
+                    std::env::var(DETERMINISTIC_RANDOM_ENV)
+                        .ok()
+                        .is_some_and(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+                },
+                |p| p.deterministic_random,
+            ),
             random_state: std::collections::hash_map::RandomState::new(),
             random_counter: 0,
             fds,
@@ -212,6 +256,20 @@ std::thread_local! {
 
 pub(crate) fn reset_from_host() {
     CTX.with(|ctx| *ctx.borrow_mut() = WasiProcMacroCtx::from_host());
+}
+
+pub(crate) fn set_policy(policy: WasiPolicy) {
+    if let Ok(mut guard) = policy_cell().write() {
+        *guard = Some(policy);
+    }
+    reset_from_host();
+}
+
+pub(crate) fn clear_policy() {
+    if let Ok(mut guard) = policy_cell().write() {
+        *guard = None;
+    }
+    reset_from_host();
 }
 
 pub(crate) fn environ_entries() -> Vec<Vec<u8>> {

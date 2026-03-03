@@ -219,8 +219,48 @@ mod wasi_ctx;
 pub mod metadata;
 
 use proc_macro::TokenStream;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
 use std::sync::Arc;
+
+#[derive(Clone, Debug)]
+pub struct WasiPreopenDir {
+    pub path: PathBuf,
+    pub writable: bool,
+}
+
+#[derive(Clone, Debug)]
+pub struct WasiPolicy {
+    pub preopens: Vec<WasiPreopenDir>,
+    pub inherit_args: bool,
+    pub inherit_env: bool,
+    pub mirror_stdio: bool,
+    pub deterministic_random: bool,
+}
+
+impl WasiPolicy {
+    pub fn native_like() -> Self {
+        let mut preopens = Vec::new();
+        if let Ok(cwd) = std::env::current_dir() {
+            preopens.push(WasiPreopenDir { path: cwd, writable: true });
+        }
+        Self {
+            preopens,
+            inherit_args: true,
+            inherit_env: true,
+            mirror_stdio: true,
+            deterministic_random: false,
+        }
+    }
+}
+
+pub fn set_wasi_policy(policy: WasiPolicy) {
+    wasi_ctx::set_policy(policy);
+}
+
+pub fn clear_wasi_policy() {
+    wasi_ctx::clear_policy();
+}
 
 /// Wrapper for WASM bytecode that can be either static or owned.
 #[derive(Clone)]
