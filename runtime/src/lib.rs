@@ -75,6 +75,16 @@ pub struct Store {
 #[derive(Debug, PartialEq)]
 pub enum Error {
     DecodeModuleFailed,
+    UnsupportedImport { module: String, name: String },
+    UnsupportedImportSignature {
+        module: String,
+        name: String,
+        expected: String,
+        found: String,
+    },
+    UnsupportedWasmFeature(&'static str),
+    UnsupportedInstruction(&'static str),
+    WasiProcExit(i32),
     NotEnoughExternVal,
     UnknownImport,
     ImportTypeMismatch,
@@ -238,7 +248,7 @@ pub fn type_func(store: &Store, funcaddr: FuncAddr) -> types::Func {
         extern_val: ExternVal::Func(funcaddr),
     }) {
         Some(types::Extern::Func(type_)) => type_.clone(),
-        _ => { eprintln!("[WATT] About to panic at lib.rs line {}", line!()); { use std::io::Write; let _ = std::io::stderr().flush(); } panic!("unreachable"); }
+        _ => panic!("unreachable")
     }
 }
 
@@ -280,6 +290,19 @@ pub fn invoke_func(
         Err(Trap {
             origin: TrapOrigin::StackOverflow,
         }) => Err(Error::StackOverflow),
+        Err(Trap {
+            origin: TrapOrigin::UnsupportedInstruction(op),
+        }) => Err(Error::UnsupportedInstruction(op)),
+        Err(Trap {
+            origin: TrapOrigin::HostFunction(ref msg),
+        }) if msg.starts_with("WasiProcExit(") && msg.ends_with(')') => {
+            let code = msg
+                .trim_start_matches("WasiProcExit(")
+                .trim_end_matches(')')
+                .parse::<i32>()
+                .unwrap_or(0);
+            Err(Error::WasiProcExit(code))
+        }
         Err(err) => Err(Error::CodeTrapped(err)),
         _ => {
             let end_drain = int.stack.len() - functype.result.len();
@@ -303,7 +326,7 @@ pub fn type_table(store: &Store, tableaddr: TableAddr) -> types::Table {
         extern_val: ExternVal::Table(tableaddr),
     }) {
         Some(types::Extern::Table(type_)) => type_.clone(),
-        _ => { eprintln!("[WATT] About to panic at lib.rs line {}", line!()); { use std::io::Write; let _ = std::io::stderr().flush(); } panic!("unreachable"); }
+        _ => panic!("unreachable")
     }
 }
 
@@ -372,7 +395,7 @@ pub fn type_mem(store: &Store, memaddr: MemAddr) -> types::Memory {
         extern_val: ExternVal::Memory(memaddr),
     }) {
         Some(types::Extern::Memory(type_)) => type_.clone(),
-        _ => { eprintln!("[WATT] About to panic at lib.rs line {}", line!()); { use std::io::Write; let _ = std::io::stderr().flush(); } panic!("unreachable"); }
+        _ => panic!("unreachable")
     }
 }
 
@@ -436,7 +459,7 @@ pub fn type_global(store: &Store, globaladdr: GlobalAddr) -> types::Global {
         extern_val: ExternVal::Global(globaladdr),
     }) {
         Some(types::Extern::Global(type_)) => type_.clone(),
-        _ => { eprintln!("[WATT] About to panic at lib.rs line {}", line!()); { use std::io::Write; let _ = std::io::stderr().flush(); } panic!("unreachable"); }
+        _ => panic!("unreachable")
     }
 }
 
@@ -515,7 +538,7 @@ pub fn instantiate_module(
     for elem in &module.elems {
         let offset = match eval_const_expr(&store.globals, &imported_globals, &elem.offset) {
             values::Value::I32(c) => c as usize,
-            _ => { eprintln!("[WATT] About to panic at lib.rs line {}", line!()); { use std::io::Write; let _ = std::io::stderr().flush(); } panic!("unreachable"); }
+            _ => panic!("unreachable")
         };
         elem_offsets.push(offset);
 
@@ -541,7 +564,7 @@ pub fn instantiate_module(
     for data in &module.data {
         let offset = match eval_const_expr(&store.globals, &imported_globals, &data.offset) {
             values::Value::I32(c) => c as usize,
-            _ => { eprintln!("[WATT] About to panic at lib.rs line {}", line!()); { use std::io::Write; let _ = std::io::stderr().flush(); } panic!("unreachable"); }
+            _ => panic!("unreachable")
         };
         data_offsets.push(offset);
 

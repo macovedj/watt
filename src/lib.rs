@@ -210,7 +210,10 @@ mod data;
 mod decode;
 mod encode;
 mod import;
+mod import_wasi_p1;
+mod import_wasi_p2_core;
 mod sym;
+mod wasi_ctx;
 
 // Metadata extraction for rustc integration
 pub mod metadata;
@@ -320,6 +323,7 @@ impl WasmMacro {
     /// # };
     /// ```
     pub fn proc_macro(&self, fun: &str, input: TokenStream) -> TokenStream {
+        wasi_ctx::reset_from_host();
         exec::proc_macro(fun, vec![input], self)
     }
 
@@ -355,6 +359,7 @@ impl WasmMacro {
     /// # };
     /// ```
     pub fn proc_macro_derive(&self, fun: &str, input: TokenStream) -> TokenStream {
+        wasi_ctx::reset_from_host();
         exec::proc_macro(fun, vec![input], self)
     }
 
@@ -395,6 +400,7 @@ impl WasmMacro {
         args: TokenStream,
         input: TokenStream,
     ) -> TokenStream {
+        wasi_ctx::reset_from_host();
         exec::proc_macro(fun, vec![args, input], self)
     }
 

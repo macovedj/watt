@@ -12,7 +12,7 @@ impl WasmArg for u32 {
     fn pop(interp: &mut Interpreter) -> Self {
         match interp.pop().unwrap() {
             Value::I32(v) => v,
-            _ => { eprintln!("[WATT] unexpected value on wasm stack at func.rs line {}", line!()); panic!("unexpected value"); }
+            _ => panic!("unexpected value")
         }
     }
 }

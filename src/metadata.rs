@@ -59,13 +59,22 @@ impl ProcMacroMetadata {
 /// - `attr:name:function_name`
 /// - `bang:name:function_name`
 pub fn extract_proc_macro_metadata(wasm_bytes: &[u8]) -> Vec<ProcMacroMetadata> {
+    extract_proc_macro_metadata_strict(wasm_bytes).unwrap_or_default()
+}
+
+/// Extract proc macro metadata from WASM bytes with strict parsing.
+///
+/// Returns an error when metadata exists but contains malformed records.
+pub fn extract_proc_macro_metadata_strict(
+    wasm_bytes: &[u8],
+) -> Result<Vec<ProcMacroMetadata>, String> {
     // Look for custom section
     if let Some(metadata_bytes) = find_custom_section(wasm_bytes, ".rustc_proc_macro_decls") {
         parse_metadata(&metadata_bytes)
     } else {
         // No metadata found - return empty vec
         // In the future, we could try to infer from exports
-        Vec::new()
+        Ok(Vec::new())
     }
 }
 
@@ -166,15 +175,15 @@ fn read_leb128_u32(bytes: &[u8]) -> Option<(u32, usize)> {
 }
 
 /// Parse metadata from the custom section bytes
-fn parse_metadata(bytes: &[u8]) -> Vec<ProcMacroMetadata> {
+fn parse_metadata(bytes: &[u8]) -> Result<Vec<ProcMacroMetadata>, String> {
     let text = match std::str::from_utf8(bytes) {
         Ok(s) => s,
-        Err(_) => return Vec::new(),
+        Err(e) => return Err(format!("metadata section is not utf8: {e}")),
     };
 
     let mut result = Vec::new();
 
-    for line in text.lines() {
+    for (lineno, line) in text.lines().enumerate() {
         let line = line.trim();
         if line.is_empty() {
             continue;
@@ -216,12 +225,16 @@ fn parse_metadata(bytes: &[u8]) -> Vec<ProcMacroMetadata> {
                 });
             }
             _ => {
-                // Unknown format, skip
+                return Err(format!(
+                    "invalid proc-macro metadata record on line {}: `{}`",
+                    lineno + 1,
+                    line
+                ));
             }
         }
     }
 
-    result
+    Ok(result)
 }
 
 #[cfg(test)]
@@ -231,11 +244,17 @@ mod tests {
     #[test]
     fn test_parse_metadata() {
         let input = b"derive:Debug:derive_debug\nattr:my_attr:my_attr_impl\nbang:my_macro:my_macro_impl";
-        let result = parse_metadata(input);
+        let result = parse_metadata(input).unwrap();
 
         assert_eq!(result.len(), 3);
         assert!(matches!(result[0], ProcMacroMetadata::CustomDerive { .. }));
         assert!(matches!(result[1], ProcMacroMetadata::Attr { .. }));
         assert!(matches!(result[2], ProcMacroMetadata::Bang { .. }));
+    }
+
+    #[test]
+    fn test_parse_metadata_malformed() {
+        let input = b"derive:OnlyTwoParts";
+        assert!(parse_metadata(input).is_err());
     }
 }
