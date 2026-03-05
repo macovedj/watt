@@ -702,4 +702,26 @@ mod tests {
         random_fill(&mut out);
         assert_eq!(&out, &[0u8; 16]);
     }
+
+    #[test]
+    fn env_allowlist_filters_entries() {
+        let Some((first_key, _)) = std::env::vars_os().next() else {
+            return;
+        };
+        let key = first_key.to_string_lossy().to_string();
+        let allow = vec![key.clone()];
+        let env = collect_env_entries(Some(&allow));
+        assert!(!env.is_empty());
+        for entry in env {
+            let s = String::from_utf8_lossy(&entry);
+            assert!(s.starts_with(&(key.clone() + "=")));
+        }
+    }
+
+    #[test]
+    fn env_allowlist_empty_allows_all() {
+        let all = collect_env_entries(None);
+        let allow_all = collect_env_entries(Some(&[]));
+        assert_eq!(all, allow_all);
+    }
 }
