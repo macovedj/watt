@@ -229,11 +229,32 @@ pub struct WasiPreopenDir {
     pub writable: bool,
 }
 
+impl WasiPreopenDir {
+    pub fn from_spec(spec: &str) -> Option<Self> {
+        let trimmed = spec.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+        let (path, writable) = if let Some(path) = trimmed.strip_suffix(":rw") {
+            (path.trim(), true)
+        } else if let Some(path) = trimmed.strip_suffix(":ro") {
+            (path.trim(), false)
+        } else {
+            (trimmed, false)
+        };
+        if path.is_empty() {
+            return None;
+        }
+        Some(Self { path: PathBuf::from(path), writable })
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct WasiPolicy {
     pub preopens: Vec<WasiPreopenDir>,
     pub inherit_args: bool,
     pub inherit_env: bool,
+    pub env_allowlist: Vec<String>,
     pub mirror_stdio: bool,
     pub deterministic_random: bool,
 }
@@ -248,6 +269,7 @@ impl WasiPolicy {
             preopens,
             inherit_args: true,
             inherit_env: true,
+            env_allowlist: Vec::new(),
             mirror_stdio: true,
             deterministic_random: false,
         }

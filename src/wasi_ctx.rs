@@ -64,9 +64,21 @@ fn collect_args_entries() -> Vec<Vec<u8>> {
     args_entries
 }
 
-fn collect_env_entries() -> Vec<Vec<u8>> {
+fn collect_env_entries(allowlist: Option<&[String]>) -> Vec<Vec<u8>> {
     let mut env_entries = Vec::new();
+    let allow_all = allowlist.is_none_or(|v| v.is_empty());
     for (k, v) in std::env::vars_os() {
+        if !allow_all {
+            let key = k.to_string_lossy();
+            let allowed = allowlist
+                .expect("allowlist must exist when allow_all is false")
+                .iter()
+                .any(|name| name == &*key);
+            if !allowed {
+                continue;
+            }
+        }
+
         let mut bytes = Vec::new();
         bytes.extend_from_slice(k.to_string_lossy().as_bytes());
         bytes.push(b'=');
@@ -164,7 +176,7 @@ impl WasiProcMacroCtx {
                 Vec::new()
             },
             env_entries: if policy.as_ref().is_none_or(|p| p.inherit_env) {
-                collect_env_entries()
+                collect_env_entries(policy.as_ref().map(|p| p.env_allowlist.as_slice()))
             } else {
                 Vec::new()
             },
