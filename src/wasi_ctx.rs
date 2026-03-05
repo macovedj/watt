@@ -595,9 +595,21 @@ pub(crate) fn captured_stderr() -> Vec<u8> {
 }
 
 #[cfg(test)]
+pub(crate) fn mirror_stdio_enabled() -> bool {
+    CTX.with(|ctx| ctx.borrow().mirror_stdio)
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{WasiPolicy, WasiPreopenDir};
+    use std::sync::{Mutex, MutexGuard, OnceLock};
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn policy_lock<'a>() -> MutexGuard<'a, ()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
+    }
 
     fn mk_tmp_dir() -> PathBuf {
         let mut p = std::env::temp_dir();
@@ -723,5 +735,35 @@ mod tests {
         let all = collect_env_entries(None);
         let allow_all = collect_env_entries(Some(&[]));
         assert_eq!(all, allow_all);
+    }
+
+    #[test]
+    fn policy_can_disable_args_and_env_inheritance() {
+        let _lock = policy_lock();
+        let mut policy = WasiPolicy::native_like();
+        policy.inherit_args = false;
+        policy.inherit_env = false;
+        policy.preopens = vec![WasiPreopenDir {
+            path: std::env::current_dir().unwrap(),
+            writable: false,
+        }];
+        set_policy(policy);
+
+        assert!(args_entries().is_empty());
+        assert!(environ_entries().is_empty());
+
+        clear_policy();
+    }
+
+    #[test]
+    fn policy_controls_mirror_stdio_toggle() {
+        let _lock = policy_lock();
+        let mut policy = WasiPolicy::native_like();
+        policy.mirror_stdio = false;
+        set_policy(policy);
+        assert!(!mirror_stdio_enabled());
+
+        clear_policy();
+        assert!(mirror_stdio_enabled());
     }
 }
