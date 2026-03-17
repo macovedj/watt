@@ -45,6 +45,10 @@ impl<T> Collection<T> {
         self.vec.push(value);
         handle as Handle
     }
+    
+    pub fn is_empty(&self) -> bool {
+        self.vec.is_empty()
+    }
 }
 
 impl<T> Index<Handle> for Collection<T> {

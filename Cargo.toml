@@ -1,35 +1,12 @@
 [package]
-name = "watt"
-version = "0.5.0"
-authors = ["David Tolnay <dtolnay@gmail.com>"]
-categories = ["development-tools::procedural-macro-helpers", "wasm"]
-description = "Runtime for executing Rust procedural macros compiled as WebAssembly."
-documentation = "https://docs.rs/watt"
+name = "rustc_watt_runtime"
+version = "0.0.0"
 edition = "2021"
-include = [
-    "LICENSE_APACHE",
-    "LICENSE_MIT",
-    "jit/src/*",
-    "runtime/LICENSE_ISC",
-    "runtime/src/*",
-    "src/*",
-]
-keywords = ["macros", "wasm"]
+description = "WebAssembly runtime for executing procedural macros (from watt)"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/dtolnay/watt"
 
-[workspace]
-members = ["demo/caller", "demo/wa", "proc-macro", "runtime/tests"]
+[dependencies]
+rustc_proc_macro = { path = "../rustc_proc_macro" }
 
-[patch.crates-io]
-watt = { path = "." }
-
-[package.metadata.docs.rs]
-targets = ["x86_64-unknown-linux-gnu"]
-rustdoc-args = [
-    "--generate-link-to-definition",
-    "--generate-macro-expansion",
-    "--extern-html-root-url=core=https://doc.rust-lang.org",
-    "--extern-html-root-url=alloc=https://doc.rust-lang.org",
-    "--extern-html-root-url=std=https://doc.rust-lang.org",
-]
+[lib]
+path = "src/lib.rs"

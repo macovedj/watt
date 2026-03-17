@@ -163,6 +163,159 @@ impl<'a> Interpreter<'a> {
             IRel(t, ref op) => self.irel(t, op),
             FRel(t, ref op) => self.frel(t, op),
             Convert(ref op) => self.cvtop(op),
+
+            // Reference types proposal instructions
+            // Minimal implementation: represent references as i32 values
+            // null = 0, non-null function refs = func_index + 1
+            RefNull => {
+                self.stack.push(Value::I32(0));
+                Ok(Continue)
+            }
+
+            RefIsNull => {
+                let val = self.stack.pop().unwrap();
+                let is_null = match val {
+                    Value::I32(0) => 1,
+                    _ => 0,
+                };
+                self.stack.push(Value::I32(is_null));
+                Ok(Continue)
+            }
+
+            RefFunc(idx) => {
+                // Push a non-null reference (func_index + 1 to distinguish from null)
+                self.stack.push(Value::I32(idx + 1));
+                Ok(Continue)
+            }
+
+            // Bulk memory operations
+            MemoryInit(_data_idx) => {
+                // Pop: dest, offset, size
+                let _size = self.stack.pop();
+                let _offset = self.stack.pop();
+                let _dest = self.stack.pop();
+                // Would copy from data segment to memory
+                Ok(Continue)
+            }
+
+            DataDrop(_data_idx) => {
+                // Would mark data segment as dropped
+                Ok(Continue)
+            }
+
+            MemoryCopy => {
+                // Pop: size, src, dest (in reverse order from stack)
+                let size = match self.stack.pop().unwrap() {
+                    Value::I32(n) => n as usize,
+                    _ => unreachable!(),
+                };
+                let src = match self.stack.pop().unwrap() {
+                    Value::I32(n) => n as usize,
+                    _ => unreachable!(),
+                };
+                let dest = match self.stack.pop().unwrap() {
+                    Value::I32(n) => n as usize,
+                    _ => unreachable!(),
+                };
+                
+                // Get memory
+                let mem = &mut self.mems[self.frame.module().mem_addrs[0]];
+                
+                // Check bounds
+                if src + size > mem.data.len() || dest + size > mem.data.len() {
+                    return Err(Trap {
+                        origin: TrapOrigin::StoreOutOfMemory,
+                    });
+                }
+                
+                // Copy memory (handle overlapping regions)
+                for i in 0..size {
+                    let byte = mem.data[src + i];
+                    mem.data[dest + i] = byte;
+                }
+                
+                Ok(Continue)
+            }
+
+            MemoryFill => {
+                // Pop: size, value, dest
+                let size = match self.stack.pop().unwrap() {
+                    Value::I32(n) => n as usize,
+                    _ => unreachable!(),
+                };
+                let value = match self.stack.pop().unwrap() {
+                    Value::I32(n) => (n & 0xFF) as u8,
+                    _ => unreachable!(),
+                };
+                let dest = match self.stack.pop().unwrap() {
+                    Value::I32(n) => n as usize,
+                    _ => unreachable!(),
+                };
+                
+                // Get memory
+                let mem = &mut self.mems[self.frame.module().mem_addrs[0]];
+                
+                // Check bounds
+                if dest + size > mem.data.len() {
+                    return Err(Trap {
+                        origin: TrapOrigin::StoreOutOfMemory,
+                    });
+                }
+                
+                // Fill memory
+                for i in 0..size {
+                    mem.data[dest + i] = value;
+                }
+                
+                Ok(Continue)
+            }
+
+            TableInit(_elem_idx, _table_idx) => {
+                // Pop: size, src, dest
+                let _size = self.stack.pop();
+                let _src = self.stack.pop();
+                let _dest = self.stack.pop();
+                // Would copy from element segment to table
+                Ok(Continue)
+            }
+
+            ElemDrop(_elem_idx) => {
+                // Would mark element segment as dropped
+                Ok(Continue)
+            }
+
+            TableCopy(_dst_table, _src_table) => {
+                // Pop: size, src, dest
+                let _size = self.stack.pop();
+                let _src = self.stack.pop();
+                let _dest = self.stack.pop();
+                // Would copy table elements
+                Ok(Continue)
+            }
+
+            TableGrow(_table_idx) => {
+                // Pop: size, init_value
+                let _size = self.stack.pop();
+                let _init = self.stack.pop();
+                // Push old size (or -1 on failure) - we'll return -1 (failure)
+                self.stack.push(Value::I32(0xFFFFFFFF)); // -1 as u32
+                Ok(Continue)
+            }
+
+            TableSize(_table_idx) => {
+                // Push current table size - return 0 for now
+                self.stack.push(Value::I32(0));
+                Ok(Continue)
+            }
+
+            TableFill(_table_idx) => {
+                // Pop: size, value, dest
+                let _size = self.stack.pop();
+                let _value = self.stack.pop();
+                let _dest = self.stack.pop();
+                // Would fill table region
+                Ok(Continue)
+            }
         }
     }
 

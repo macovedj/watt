@@ -196,23 +196,15 @@
     clippy::needless_pass_by_value
 )]
 
-extern crate proc_macro;
+extern crate rustc_proc_macro as proc_macro;
 
-#[cfg(not(jit))]
-#[path = "interpret.rs"]
-mod exec;
-
-#[cfg(not(jit))]
+// Include the runtime directly from its source directory.
+// This avoids duplicating files while keeping the module structure.
 #[path = "../runtime/src/lib.rs"]
 mod runtime;
 
-#[cfg(jit)]
-#[path = "jit.rs"]
+#[path = "interpret.rs"]
 mod exec;
-
-#[cfg(jit)]
-#[path = "../jit/src/lib.rs"]
-mod runtime;
 
 mod data;
 mod decode;
@@ -220,8 +212,28 @@ mod encode;
 mod import;
 mod sym;
 
+// Metadata extraction for rustc integration
+pub mod metadata;
+
 use proc_macro::TokenStream;
 use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
+use std::sync::Arc;
+
+/// Wrapper for WASM bytecode that can be either static or owned.
+#[derive(Clone)]
+enum WasmBytes {
+    Static(&'static [u8]),
+    Owned(Arc<Vec<u8>>),
+}
+
+impl WasmBytes {
+    fn as_slice(&self) -> &[u8] {
+        match self {
+            WasmBytes::Static(bytes) => bytes,
+            WasmBytes::Owned(vec) => vec.as_slice(),
+        }
+    }
+}
 
 /// An instantiation of a WebAssembly module used to invoke procedural macro
 /// methods on the wasm module.
@@ -236,7 +248,7 @@ use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
 /// # };
 /// ```
 pub struct WasmMacro {
-    wasm: &'static [u8],
+    wasm: WasmBytes,
     id: AtomicUsize,
 }
 
@@ -253,9 +265,27 @@ impl WasmMacro {
     /// ```
     pub const fn new(wasm: &'static [u8]) -> WasmMacro {
         WasmMacro {
-            wasm,
+            wasm: WasmBytes::Static(wasm),
             id: AtomicUsize::new(0),
         }
+    }
+
+    /// Creates a new `WasmMacro` from an owned Vec of wasm bytes.
+    ///
+    /// This is added for rustc integration where WASM bytecode is loaded
+    /// from disk rather than being statically included.
+    pub fn new_owned(wasm: Vec<u8>) -> WasmMacro {
+        WasmMacro {
+            wasm: WasmBytes::Owned(Arc::new(wasm)),
+            id: AtomicUsize::new(0),
+        }
+    }
+
+    /// Get the wasm bytes as a slice.
+    ///
+    /// This is useful for extracting metadata from the WASM module.
+    pub fn wasm_bytes(&self) -> &[u8] {
+        self.wasm.as_slice()
     }
 
     /// A #\[proc_macro\] implemented in wasm!
