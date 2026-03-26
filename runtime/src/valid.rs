@@ -517,7 +517,9 @@ fn check_convert_op(
         F32DemoteF64 => exact_step(operands, frames, &[Float(F64)], &[Float(F32)]),
         F64PromoteF32 => exact_step(operands, frames, &[Float(F32)], &[Float(F64)]),
         Reinterpret { from, to, .. } => exact_step(operands, frames, &[from], &[to]),
-        Trunc { from, to, .. } => exact_step(operands, frames, &[Float(from)], &[Int(to)]),
+        Trunc { from, to, .. } | TruncSat { from, to, .. } => {
+            exact_step(operands, frames, &[Float(from)], &[Int(to)])
+        }
         Convert { from, to, .. } => exact_step(operands, frames, &[Int(from)], &[Float(to)]),
     }
 }

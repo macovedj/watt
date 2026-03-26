@@ -124,7 +124,18 @@ pub fn init_store() -> Store {
 
 /// Decode a binary module
 pub fn decode_module<R: Read + Seek>(reader: R) -> Result<ast::Module, Error> {
-    binary::decode(reader).map_err(|_| Error::DecodeModuleFailed)
+    match binary::decode(reader) {
+        Ok(module) => Ok(module),
+        Err(binary::DecodeError::Io(_) | binary::DecodeError::MalformedBinary) => {
+            Err(Error::DecodeModuleFailed)
+        }
+        Err(binary::DecodeError::UnsupportedWasmFeature(feature)) => {
+            Err(Error::UnsupportedWasmFeature(feature))
+        }
+        Err(binary::DecodeError::UnsupportedInstruction(op)) => {
+            Err(Error::UnsupportedInstruction(op))
+        }
+    }
 }
 
 /// Validate a module

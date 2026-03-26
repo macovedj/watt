@@ -18,6 +18,8 @@ pub fn decode<R: Read>(reader: R) -> Result<Module, DecodeError> {
 pub enum DecodeError {
     Io(io::Error),
     MalformedBinary,
+    UnsupportedWasmFeature(&'static str),
+    UnsupportedInstruction(&'static str),
 }
 
 impl From<io::Error> for DecodeError {
@@ -213,15 +215,47 @@ impl<R: Read> Decoder<R> {
         Ok(types::Limits { min, max })
     }
 
+    fn read_limits_flags(&mut self) -> DecodeResult<(u32, types::Limits)> {
+        let flags = self.read_vu32()?;
+        match flags {
+            0 => {
+                let min = self.read_vu32()?;
+                Ok((flags, types::Limits { min, max: None }))
+            }
+            1 => {
+                let min = self.read_vu32()?;
+                let max = self.read_vu32()?;
+                Ok((flags, types::Limits { min, max: Some(max) }))
+            }
+            _ => Err(DecodeError::MalformedBinary),
+        }
+    }
+
     fn read_memory_type(&mut self) -> DecodeResult<types::Memory> {
+        let flags = self.read_vu32()?;
+        let limits = match flags {
+            0 => {
+                let min = self.read_vu32()?;
+                types::Limits { min, max: None }
+            }
+            1 => {
+                let min = self.read_vu32()?;
+                let max = self.read_vu32()?;
+                types::Limits { min, max: Some(max) }
+            }
+            2 | 3 => return Err(DecodeError::UnsupportedWasmFeature("threads")),
+            _ => return Err(DecodeError::MalformedBinary),
+        };
         Ok(types::Memory {
-            limits: self.read_limits()?,
+            limits,
         })
     }
 
     fn read_elem_type(&mut self) -> DecodeResult<types::Elem> {
-        if self.read_byte()? != 0x70 {
-            return Err(DecodeError::MalformedBinary);
+        match self.read_byte()? {
+            0x70 => {}
+            0x6f => return Err(DecodeError::UnsupportedWasmFeature("reference-types")),
+            _ => return Err(DecodeError::MalformedBinary),
         }
 
         Ok(types::Elem::AnyFunc)
@@ -229,7 +263,7 @@ impl<R: Read> Decoder<R> {
 
     fn read_table_type(&mut self) -> DecodeResult<types::Table> {
         let elem = self.read_elem_type()?;
-        let limits = self.read_limits()?;
+        let (_flags, limits) = self.read_limits_flags()?;
         Ok(types::Table { limits, elem })
     }
 
@@ -297,6 +331,7 @@ impl<R: Read> Decoder<R> {
 
             0x1a => Drop_,
             0x1b => Select,
+            0x12 | 0x13 => return Err(DecodeError::UnsupportedWasmFeature("tail-call")),
 
             0x20 => GetLocal(self.read_index()?),
             0x21 => SetLocal(self.read_index()?),
@@ -565,7 +600,9 @@ impl<R: Read> Decoder<R> {
 
             // Reference types proposal instructions (0xD0-0xD2)
             0xd0 => {
-                let _reftype = self.read_byte()?;
+                if self.read_byte()? != 0x70 {
+                    return Err(DecodeError::UnsupportedWasmFeature("reference-types"));
+                }
                 RefNull
             }
             0xd1 => {
@@ -580,6 +617,46 @@ impl<R: Read> Decoder<R> {
             0xfc => {
                 let bulk_op = self.read_vu32()?;
                 match bulk_op {
+                    0x00 => Convert(ConvertOp::TruncSat {
+                        from: F32,
+                        to: I32,
+                        signed: true,
+                    }),
+                    0x01 => Convert(ConvertOp::TruncSat {
+                        from: F32,
+                        to: I32,
+                        signed: false,
+                    }),
+                    0x02 => Convert(ConvertOp::TruncSat {
+                        from: F64,
+                        to: I32,
+                        signed: true,
+                    }),
+                    0x03 => Convert(ConvertOp::TruncSat {
+                        from: F64,
+                        to: I32,
+                        signed: false,
+                    }),
+                    0x04 => Convert(ConvertOp::TruncSat {
+                        from: F32,
+                        to: I64,
+                        signed: true,
+                    }),
+                    0x05 => Convert(ConvertOp::TruncSat {
+                        from: F32,
+                        to: I64,
+                        signed: false,
+                    }),
+                    0x06 => Convert(ConvertOp::TruncSat {
+                        from: F64,
+                        to: I64,
+                        signed: true,
+                    }),
+                    0x07 => Convert(ConvertOp::TruncSat {
+                        from: F64,
+                        to: I64,
+                        signed: false,
+                    }),
                     0x08 => {
                         let data_idx = self.read_index()?;
                         let _mem_idx = self.read_byte()?; // Always 0 in MVP
@@ -625,10 +702,13 @@ impl<R: Read> Decoder<R> {
                         TableFill(table_idx)
                     }
                     _ => {
-                        return Err(DecodeError::MalformedBinary);
+                        return Err(DecodeError::UnsupportedInstruction("unknown 0xfc-prefixed instruction"));
                     }
                 }
             }
+
+            0xfd => return Err(DecodeError::UnsupportedWasmFeature("simd128")),
+            0xfe => return Err(DecodeError::UnsupportedWasmFeature("threads")),
 
             _ => {
                 return Err(DecodeError::MalformedBinary);
@@ -960,6 +1040,7 @@ fn decode_value_type(b: u8) -> DecodeResult<types::Value> {
         0x7e => Ok(Value::Int(Int::I64)),
         0x7d => Ok(Value::Float(Float::F32)),
         0x7c => Ok(Value::Float(Float::F64)),
+        0x7b => Err(DecodeError::UnsupportedWasmFeature("simd128")),
         _ => Err(DecodeError::MalformedBinary),
     }
 }

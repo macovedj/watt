@@ -1,7 +1,7 @@
 use crate::data::Data;
 use crate::import;
 use crate::import_wasi_p1;
-use crate::import_wasi_p2_core;
+use crate::module_support;
 use crate::runtime::{
     alloc_func, decode_module, get_export, init_store, instantiate_module, invoke_func,
     module_imports, types, Extern, ExternVal, FuncAddr, Module, ModuleInst, Store, Value,
@@ -38,6 +38,9 @@ impl ThreadState {
         let cursor = Cursor::new(instance.wasm_bytes());
         let module = decode_module(cursor).unwrap_or_else(|e| {
             panic!("Failed to decode WASM module: {:?}", e);
+        });
+        module_support::ensure_wasm32_wasip1_proc_macro_module(&module).unwrap_or_else(|e| {
+            panic!("Unsupported wasm32-wasip1 proc-macro module: {:?}", e);
         });
         #[cfg(watt_debug)]
         print_module(&module);
@@ -145,8 +148,6 @@ fn mk_host_func(import: Import, store: &mut Store) -> Result<ExternVal, crate::r
         import::host_func(name, store, func)
     } else if module == import_wasi_p1::WASI_P1_MODULE {
         import_wasi_p1::host_func(name, func)
-    } else if import_wasi_p2_core::is_supported_module(module) {
-        import_wasi_p2_core::host_func(name, func)
     } else {
         Ok(None)
     };
@@ -191,11 +192,57 @@ fn format_func_sig(func: &types::Func) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::mk_host_func;
-    use crate::runtime::{init_store, types, Error, Extern};
+    use super::{extern_vals, mk_host_func};
+    use crate::module_support;
+    use crate::runtime::{
+        decode_module, get_export, init_store, instantiate_module, invoke_func, types, Error,
+        Extern, ExternVal, Module, ModuleInst, Store, Value,
+    };
+    use crate::wasi_ctx;
+    use std::io::Cursor;
+    use std::path::PathBuf;
+    use std::rc::Rc;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     fn i32() -> types::Value {
         types::Value::Int(types::Int::I32)
+    }
+
+    fn mk_tmp_dir() -> PathBuf {
+        let mut p = std::env::temp_dir();
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        p.push(format!("rustc-watt-interpret-test-{nanos}"));
+        std::fs::create_dir_all(&p).unwrap();
+        p
+    }
+
+    fn instantiate_wat(wat_src: &str) -> (Store, Rc<ModuleInst>) {
+        let wasm = wat::parse_str(wat_src).unwrap();
+        let module = decode_module(Cursor::new(wasm)).unwrap();
+        module_support::ensure_wasm32_wasip1_proc_macro_module(&module).unwrap();
+        instantiate_validated_module(module)
+    }
+
+    fn instantiate_validated_module(module: Module) -> (Store, Rc<ModuleInst>) {
+        let mut store = init_store();
+        let externs = extern_vals(&module, &mut store).unwrap();
+        let inst = instantiate_module(&mut store, module, &externs).unwrap();
+        (store, inst)
+    }
+
+    fn invoke_export(
+        store: &mut Store,
+        inst: &ModuleInst,
+        name: &str,
+        args: Vec<Value>,
+    ) -> Result<Vec<Value>, Error> {
+        let ExternVal::Func(func) = get_export(inst, name).unwrap() else {
+            panic!("export `{name}` must be a function");
+        };
+        invoke_func(store, func, args)
     }
 
     #[test]
@@ -223,6 +270,320 @@ mod tests {
             Error::UnsupportedImportSignature { module, name, .. }
             if module == "wasi_snapshot_preview1" && name == "proc_exit"
         ));
+    }
+
+    #[test]
+    fn executes_fd_write_to_stdout_capture() {
+        wasi_ctx::set_for_test(Vec::new(), false);
+        let (mut store, inst) = instantiate_wat(
+            r#"(module
+                (type $fd_write (func (param i32 i32 i32 i32) (result i32)))
+                (import "wasi_snapshot_preview1" "fd_write" (func $fd_write (type $fd_write)))
+                (memory 1)
+                (data (i32.const 16) "hello")
+                (func (export "run") (result i32)
+                    i32.const 0
+                    i32.const 16
+                    i32.store
+                    i32.const 4
+                    i32.const 5
+                    i32.store
+                    i32.const 1
+                    i32.const 0
+                    i32.const 1
+                    i32.const 8
+                    call $fd_write
+                )
+            )"#,
+        );
+
+        let ret = invoke_export(&mut store, &inst, "run", Vec::new()).unwrap();
+        assert_eq!(ret, vec![Value::I32(0)]);
+        assert_eq!(wasi_ctx::captured_stdout(), b"hello");
+    }
+
+    #[test]
+    fn executes_random_get_deterministically() {
+        wasi_ctx::set_for_test_full(Vec::new(), Vec::new(), false, true);
+        let (mut store, inst) = instantiate_wat(
+            r#"(module
+                (type $random_get (func (param i32 i32) (result i32)))
+                (import "wasi_snapshot_preview1" "random_get" (func $random_get (type $random_get)))
+                (memory 1)
+                (func (export "run") (result i32)
+                    i32.const 0
+                    i32.const 4
+                    call $random_get
+                    drop
+                    i32.const 0
+                    i32.load
+                )
+            )"#,
+        );
+
+        let ret = invoke_export(&mut store, &inst, "run", Vec::new()).unwrap();
+        assert_eq!(ret, vec![Value::I32(0)]);
+    }
+
+    #[test]
+    fn executes_clock_time_get_in_deterministic_mode() {
+        wasi_ctx::set_for_test_full(Vec::new(), Vec::new(), false, true);
+        let (mut store, inst) = instantiate_wat(
+            r#"(module
+                (type $clock_res_get (func (param i32 i32) (result i32)))
+                (type $clock_time_get (func (param i32 i64 i32) (result i32)))
+                (import "wasi_snapshot_preview1" "clock_res_get" (func $clock_res_get (type $clock_res_get)))
+                (import "wasi_snapshot_preview1" "clock_time_get" (func $clock_time_get (type $clock_time_get)))
+                (memory 1)
+                (func (export "run") (result i64)
+                    i32.const 0
+                    i32.const 16
+                    call $clock_res_get
+                    drop
+                    i32.const 0
+                    i64.const 0
+                    i32.const 8
+                    call $clock_time_get
+                    drop
+                    i32.const 16
+                    i64.load
+                    i32.wrap_i64
+                    if (result i64)
+                        i32.const 8
+                        i64.load
+                    else
+                        i64.const -1
+                    end
+                )
+            )"#,
+        );
+
+        let ret = invoke_export(&mut store, &inst, "run", Vec::new()).unwrap();
+        assert_eq!(ret, vec![Value::I64(0)]);
+    }
+
+    #[test]
+    fn executes_args_and_environ_queries() {
+        let args = vec![b"rustc\0".to_vec()];
+        let env = vec![b"K=V\0".to_vec()];
+        wasi_ctx::set_for_test_full(args, env, false, false);
+        let (mut store, inst) = instantiate_wat(
+            r#"(module
+                (type $sizes (func (param i32 i32) (result i32)))
+                (type $get (func (param i32 i32) (result i32)))
+                (import "wasi_snapshot_preview1" "args_sizes_get" (func $args_sizes_get (type $sizes)))
+                (import "wasi_snapshot_preview1" "args_get" (func $args_get (type $get)))
+                (import "wasi_snapshot_preview1" "environ_sizes_get" (func $env_sizes_get (type $sizes)))
+                (import "wasi_snapshot_preview1" "environ_get" (func $env_get (type $get)))
+                (memory 1)
+                (func (export "run") (result i32)
+                    i32.const 0
+                    i32.const 4
+                    call $args_sizes_get
+                    drop
+                    i32.const 8
+                    i32.const 16
+                    call $args_get
+                    drop
+                    i32.const 24
+                    i32.const 28
+                    call $env_sizes_get
+                    drop
+                    i32.const 32
+                    i32.const 40
+                    call $env_get
+                    drop
+                    i32.const 16
+                    i32.load8_u
+                    i32.const 114
+                    i32.sub
+                    i32.const 40
+                    i32.load8_u
+                    i32.const 75
+                    i32.sub
+                    i32.add
+                )
+            )"#,
+        );
+
+        let ret = invoke_export(&mut store, &inst, "run", Vec::new()).unwrap();
+        assert_eq!(ret, vec![Value::I32(0)]);
+    }
+
+    #[test]
+    fn executes_path_open_fd_write_and_close() {
+        let dir = mk_tmp_dir();
+        let out = dir.join("out.txt");
+        std::fs::write(&out, b"").unwrap();
+        wasi_ctx::set_for_test_with_preopens(Vec::new(), false, vec![(dir.clone(), true)]);
+        let (mut store, inst) = instantiate_wat(
+            r#"(module
+                (type $path_open (func (param i32 i32 i32 i32 i32 i64 i64 i32 i32) (result i32)))
+                (type $fd_write (func (param i32 i32 i32 i32) (result i32)))
+                (type $fd_close (func (param i32) (result i32)))
+                (import "wasi_snapshot_preview1" "path_open" (func $path_open (type $path_open)))
+                (import "wasi_snapshot_preview1" "fd_write" (func $fd_write (type $fd_write)))
+                (import "wasi_snapshot_preview1" "fd_close" (func $fd_close (type $fd_close)))
+                (memory 1)
+                (data (i32.const 32) "out.txt")
+                (data (i32.const 64) "hello")
+                (func (export "run") (result i32)
+                    i32.const 3
+                    i32.const 0
+                    i32.const 32
+                    i32.const 7
+                    i32.const 0
+                    i64.const 64
+                    i64.const 0
+                    i32.const 0
+                    i32.const 24
+                    call $path_open
+                    if (result i32)
+                        i32.const 1
+                    else
+                        i32.const 0
+                        i32.const 64
+                        i32.store
+                        i32.const 4
+                        i32.const 5
+                        i32.store
+                        i32.const 24
+                        i32.load
+                        i32.const 0
+                        i32.const 1
+                        i32.const 28
+                        call $fd_write
+                        drop
+                        i32.const 24
+                        i32.load
+                        call $fd_close
+                    end
+                )
+            )"#,
+        );
+
+        let ret = invoke_export(&mut store, &inst, "run", Vec::new()).unwrap();
+        assert_eq!(ret, vec![Value::I32(0)]);
+        assert_eq!(std::fs::read(out).unwrap(), b"hello");
+    }
+
+    #[test]
+    fn executes_path_open_fd_read_and_close() {
+        let dir = mk_tmp_dir();
+        std::fs::write(dir.join("in.txt"), b"ABC").unwrap();
+        wasi_ctx::set_for_test_with_preopens(Vec::new(), false, vec![(dir.clone(), false)]);
+        let (mut store, inst) = instantiate_wat(
+            r#"(module
+                (type $path_open (func (param i32 i32 i32 i32 i32 i64 i64 i32 i32) (result i32)))
+                (type $fd_read (func (param i32 i32 i32 i32) (result i32)))
+                (type $fd_close (func (param i32) (result i32)))
+                (import "wasi_snapshot_preview1" "path_open" (func $path_open (type $path_open)))
+                (import "wasi_snapshot_preview1" "fd_read" (func $fd_read (type $fd_read)))
+                (import "wasi_snapshot_preview1" "fd_close" (func $fd_close (type $fd_close)))
+                (memory 1)
+                (data (i32.const 32) "in.txt")
+                (func (export "run") (result i32)
+                    i32.const 3
+                    i32.const 0
+                    i32.const 32
+                    i32.const 6
+                    i32.const 0
+                    i64.const 0
+                    i64.const 0
+                    i32.const 0
+                    i32.const 24
+                    call $path_open
+                    drop
+                    i32.const 0
+                    i32.const 64
+                    i32.store
+                    i32.const 4
+                    i32.const 3
+                    i32.store
+                    i32.const 24
+                    i32.load
+                    i32.const 0
+                    i32.const 1
+                    i32.const 28
+                    call $fd_read
+                    drop
+                    i32.const 24
+                    i32.load
+                    call $fd_close
+                    drop
+                    i32.const 64
+                    i32.load8_u
+                    i32.const 65
+                    i32.sub
+                )
+            )"#,
+        );
+
+        let ret = invoke_export(&mut store, &inst, "run", Vec::new()).unwrap();
+        assert_eq!(ret, vec![Value::I32(0)]);
+    }
+
+    #[test]
+    fn executes_fd_prestat_queries_and_readdir_nosys() {
+        let dir = mk_tmp_dir().canonicalize().unwrap();
+        let first_byte = dir.to_string_lossy().as_bytes()[0] as u32;
+        wasi_ctx::set_for_test_with_preopens(Vec::new(), false, vec![(dir.clone(), false)]);
+        let (mut store, inst) = instantiate_wat(
+            r#"(module
+                (type $fd_prestat_get (func (param i32 i32) (result i32)))
+                (type $fd_prestat_dir_name (func (param i32 i32 i32) (result i32)))
+                (type $fd_readdir (func (param i32 i32 i32 i64 i32) (result i32)))
+                (import "wasi_snapshot_preview1" "fd_prestat_get" (func $fd_prestat_get (type $fd_prestat_get)))
+                (import "wasi_snapshot_preview1" "fd_prestat_dir_name" (func $fd_prestat_dir_name (type $fd_prestat_dir_name)))
+                (import "wasi_snapshot_preview1" "fd_readdir" (func $fd_readdir (type $fd_readdir)))
+                (memory 1)
+                (func (export "prestat_first_byte") (result i32)
+                    i32.const 3
+                    i32.const 0
+                    call $fd_prestat_get
+                    drop
+                    i32.const 3
+                    i32.const 8
+                    i32.const 4
+                    i32.load
+                    call $fd_prestat_dir_name
+                    drop
+                    i32.const 8
+                    i32.load8_u
+                )
+                (func (export "readdir_errno") (result i32)
+                    i32.const 3
+                    i32.const 16
+                    i32.const 8
+                    i64.const 0
+                    i32.const 24
+                    call $fd_readdir
+                )
+            )"#,
+        );
+
+        let first = invoke_export(&mut store, &inst, "prestat_first_byte", Vec::new()).unwrap();
+        assert_eq!(first, vec![Value::I32(first_byte)]);
+
+        let errno = invoke_export(&mut store, &inst, "readdir_errno", Vec::new()).unwrap();
+        assert_eq!(errno, vec![Value::I32(wasi_ctx::ERRNO_NOSYS as u32)]);
+    }
+
+    #[test]
+    fn executes_proc_exit_as_typed_runtime_error() {
+        let (mut store, inst) = instantiate_wat(
+            r#"(module
+                (type $proc_exit (func (param i32)))
+                (import "wasi_snapshot_preview1" "proc_exit" (func $proc_exit (type $proc_exit)))
+                (func (export "run")
+                    i32.const 7
+                    call $proc_exit
+                )
+            )"#,
+        );
+
+        let err = invoke_export(&mut store, &inst, "run", Vec::new()).unwrap_err();
+        assert_eq!(err, Error::WasiProcExit(7));
     }
 }
 

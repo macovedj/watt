@@ -688,6 +688,90 @@ impl<'a> Interpreter<'a> {
         }
     }
 
+    fn trunc_sat_f32_to_i32(v: f32, signed: bool) -> Value {
+        if v.is_nan() {
+            return Value::I32(0);
+        }
+        if signed {
+            if v.is_infinite() {
+                return Value::from_i32(if v.is_sign_negative() { i32::MIN } else { i32::MAX });
+            }
+            let truncated = v.trunc();
+            let clamped = truncated.clamp(i32::MIN as f32, i32::MAX as f32);
+            Value::from_i32(clamped as i32)
+        } else {
+            if v.is_infinite() {
+                return Value::I32(if v.is_sign_negative() { 0 } else { u32::MAX });
+            }
+            let truncated = v.trunc();
+            let clamped = truncated.clamp(0.0, u32::MAX as f32);
+            Value::I32(clamped as u32)
+        }
+    }
+
+    fn trunc_sat_f64_to_i32(v: f64, signed: bool) -> Value {
+        if v.is_nan() {
+            return Value::I32(0);
+        }
+        if signed {
+            if v.is_infinite() {
+                return Value::from_i32(if v.is_sign_negative() { i32::MIN } else { i32::MAX });
+            }
+            let truncated = v.trunc();
+            let clamped = truncated.clamp(i32::MIN as f64, i32::MAX as f64);
+            Value::from_i32(clamped as i32)
+        } else {
+            if v.is_infinite() {
+                return Value::I32(if v.is_sign_negative() { 0 } else { u32::MAX });
+            }
+            let truncated = v.trunc();
+            let clamped = truncated.clamp(0.0, u32::MAX as f64);
+            Value::I32(clamped as u32)
+        }
+    }
+
+    fn trunc_sat_f32_to_i64(v: f32, signed: bool) -> Value {
+        if v.is_nan() {
+            return Value::I64(0);
+        }
+        if signed {
+            if v.is_infinite() {
+                return Value::from_i64(if v.is_sign_negative() { i64::MIN } else { i64::MAX });
+            }
+            let truncated = v.trunc();
+            let clamped = truncated.clamp(i64::MIN as f32, i64::MAX as f32);
+            Value::from_i64(clamped as i64)
+        } else {
+            if v.is_infinite() {
+                return Value::I64(if v.is_sign_negative() { 0 } else { u64::MAX });
+            }
+            let truncated = v.trunc();
+            let clamped = truncated.clamp(0.0, u64::MAX as f32);
+            Value::I64(clamped as u64)
+        }
+    }
+
+    fn trunc_sat_f64_to_i64(v: f64, signed: bool) -> Value {
+        if v.is_nan() {
+            return Value::I64(0);
+        }
+        if signed {
+            if v.is_infinite() {
+                return Value::from_i64(if v.is_sign_negative() { i64::MIN } else { i64::MAX });
+            }
+            let truncated = v.trunc();
+            let clamped = truncated.clamp(i64::MIN as f64, i64::MAX as f64);
+            Value::from_i64(clamped as i64)
+        } else {
+            if v.is_infinite() {
+                return Value::I64(if v.is_sign_negative() { 0 } else { u64::MAX });
+            }
+            let truncated = v.trunc();
+            let clamped = truncated.clamp(0.0, u64::MAX as f64);
+            Value::I64(clamped as u64)
+        }
+    }
+
     /// Dispatch a ConvertOp
     fn cvtop(&mut self, op: &ConvertOp) -> IntResult {
         use super::types::Value as tv;
@@ -764,6 +848,38 @@ impl<'a> Interpreter<'a> {
                     },
                     Value::F64(c),
                 ) => Value::from_i64(c.to_i64()?),
+                (
+                    &ConvertOp::TruncSat {
+                        from: Float::F32,
+                        to: Int::I32,
+                        signed,
+                    },
+                    Value::F32(c),
+                ) => Self::trunc_sat_f32_to_i32(c, signed),
+                (
+                    &ConvertOp::TruncSat {
+                        from: Float::F64,
+                        to: Int::I32,
+                        signed,
+                    },
+                    Value::F64(c),
+                ) => Self::trunc_sat_f64_to_i32(c, signed),
+                (
+                    &ConvertOp::TruncSat {
+                        from: Float::F32,
+                        to: Int::I64,
+                        signed,
+                    },
+                    Value::F32(c),
+                ) => Self::trunc_sat_f32_to_i64(c, signed),
+                (
+                    &ConvertOp::TruncSat {
+                        from: Float::F64,
+                        to: Int::I64,
+                        signed,
+                    },
+                    Value::F64(c),
+                ) => Self::trunc_sat_f64_to_i64(c, signed),
 
                 (
                     &ConvertOp::Convert {

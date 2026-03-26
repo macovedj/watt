@@ -90,6 +90,11 @@ pub enum ConvertOp {
         to: types::Int,
         signed: bool,
     },
+    TruncSat {
+        from: types::Float,
+        to: types::Int,
+        signed: bool,
+    },
     Convert {
         from: types::Int,
         to: types::Float,

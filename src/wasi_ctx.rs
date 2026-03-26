@@ -4,6 +4,7 @@ use std::hash::{BuildHasher, Hasher};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Component, Path, PathBuf};
 use std::sync::{OnceLock, RwLock};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use crate::WasiPolicy;
 
@@ -506,6 +507,41 @@ pub(crate) fn fd_prestat_dir_name(fd: u32) -> Result<Vec<u8>, i32> {
     })
 }
 
+pub(crate) fn clock_res_get(clock_id: u32) -> Result<u64, i32> {
+    match clock_id {
+        0 | 1 => Ok(1),
+        _ => Err(ERRNO_NOSYS),
+    }
+}
+
+pub(crate) fn clock_time_get(clock_id: u32) -> Result<u64, i32> {
+    CTX.with(|ctx| {
+        let ctx = ctx.borrow();
+        match clock_id {
+            0 => {
+                if ctx.deterministic_random {
+                    Ok(0)
+                } else {
+                    SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .map(|duration| duration.as_nanos() as u64)
+                        .map_err(|_| ERRNO_IO)
+                }
+            }
+            1 => {
+                if ctx.deterministic_random {
+                    Ok(0)
+                } else {
+                    static START: OnceLock<Instant> = OnceLock::new();
+                    let start = START.get_or_init(Instant::now);
+                    Ok(start.elapsed().as_nanos() as u64)
+                }
+            }
+            _ => Err(ERRNO_NOSYS),
+        }
+    })
+}
+
 #[cfg(test)]
 pub(crate) fn set_for_test(env_entries: Vec<Vec<u8>>, mirror_stdio: bool) {
     CTX.with(|ctx| {
@@ -603,6 +639,8 @@ pub(crate) fn mirror_stdio_enabled() -> bool {
 mod tests {
     use super::*;
     use crate::{WasiPolicy, WasiPreopenDir};
+    #[cfg(unix)]
+    use std::os::unix::fs::symlink;
     use std::sync::{Mutex, MutexGuard, OnceLock};
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -701,6 +739,43 @@ mod tests {
     }
 
     #[test]
+    fn fd_seek_and_tell_round_trip() {
+        let dir = mk_tmp_dir();
+        std::fs::write(dir.join("seek.txt"), b"abcdef").unwrap();
+        set_for_test_with_preopens(Vec::new(), false, vec![(dir.clone(), true)]);
+
+        let fd = path_open(3, b"seek.txt", 0, 0, 0).unwrap();
+        assert_eq!(fd_tell(fd).unwrap(), 0);
+        assert_eq!(fd_seek(fd, 2, 0).unwrap(), 2);
+        assert_eq!(fd_tell(fd).unwrap(), 2);
+        fd_close(fd).unwrap();
+    }
+
+    #[test]
+    fn fd_prestat_reports_preopen_name() {
+        let dir = mk_tmp_dir().canonicalize().unwrap();
+        set_for_test_with_preopens(Vec::new(), false, vec![(dir.clone(), false)]);
+
+        let len = fd_prestat_dir(3).unwrap();
+        let name = fd_prestat_dir_name(3).unwrap();
+        assert_eq!(len as usize, dir.to_string_lossy().len());
+        assert_eq!(name, dir.to_string_lossy().as_bytes());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn path_open_denies_symlink_breakout() {
+        let dir = mk_tmp_dir();
+        let outside = mk_tmp_dir();
+        std::fs::write(outside.join("secret.txt"), b"top-secret").unwrap();
+        symlink(&outside, dir.join("escape")).unwrap();
+
+        set_for_test_with_preopens(Vec::new(), false, vec![(dir.clone(), false)]);
+        let err = path_open(3, b"escape/secret.txt", 0, 0, 0).unwrap_err();
+        assert_eq!(err, ERRNO_PERM);
+    }
+
+    #[test]
     fn default_fallback_preopen_is_writable() {
         let preopens = preopens_from_host();
         assert!(!preopens.is_empty());
@@ -713,6 +788,16 @@ mod tests {
         let mut out = [1u8; 16];
         random_fill(&mut out);
         assert_eq!(&out, &[0u8; 16]);
+    }
+
+    #[test]
+    fn deterministic_mode_zeroes_supported_clocks() {
+        set_for_test_full(Vec::new(), Vec::new(), false, true);
+        assert_eq!(clock_res_get(0).unwrap(), 1);
+        assert_eq!(clock_res_get(1).unwrap(), 1);
+        assert_eq!(clock_time_get(0).unwrap(), 0);
+        assert_eq!(clock_time_get(1).unwrap(), 0);
+        assert_eq!(clock_time_get(999).unwrap_err(), ERRNO_NOSYS);
     }
 
     #[test]

@@ -8,5 +8,8 @@ license = "MIT OR Apache-2.0"
 [dependencies]
 rustc_proc_macro = { path = "../rustc_proc_macro" }
 
+[dev-dependencies]
+wat = "1.240.0"
+
 [lib]
 path = "src/lib.rs"

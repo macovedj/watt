@@ -211,12 +211,14 @@ mod decode;
 mod encode;
 mod import;
 mod import_wasi_p1;
-mod import_wasi_p2_core;
+mod module_support;
 mod sym;
 mod wasi_ctx;
 
 // Metadata extraction for rustc integration
 pub mod metadata;
+
+pub use module_support::{ModuleCapabilityCensus, validate_wasm32_wasip1_proc_macro_module};
 
 use proc_macro::TokenStream;
 use std::path::PathBuf;

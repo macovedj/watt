@@ -39,6 +39,15 @@ fn write_u32(memory: &mut [u8], ptr: usize, value: u32) -> bool {
     true
 }
 
+fn write_u64(memory: &mut [u8], ptr: usize, value: u64) -> bool {
+    let end = ptr.saturating_add(8);
+    if end > memory.len() {
+        return false;
+    }
+    memory[ptr..end].copy_from_slice(&value.to_le_bytes());
+    true
+}
+
 fn wasi_args_sizes_get(interp: &mut crate::runtime::Interpreter<'_>) -> Option<String> {
     let buf_size_ptr = pop_u32(interp)? as usize;
     let count_ptr = pop_u32(interp)? as usize;
@@ -190,6 +199,45 @@ fn wasi_random_get(interp: &mut crate::runtime::Interpreter<'_>) -> Option<Strin
         return None;
     }
     wasi_ctx::random_fill(&mut memory[buf_ptr..end]);
+    interp.push(Value::I32(wasi_ctx::ERRNO_SUCCESS as u32));
+    None
+}
+
+fn wasi_clock_res_get(interp: &mut crate::runtime::Interpreter<'_>) -> Option<String> {
+    let resolution_ptr = pop_u32(interp)? as usize;
+    let clock_id = pop_u32(interp)?;
+    let resolution = match wasi_ctx::clock_res_get(clock_id) {
+        Ok(value) => value,
+        Err(errno) => {
+            interp.push(Value::I32(errno as u32));
+            return None;
+        }
+    };
+    let memory = interp.get_memory_mut();
+    if !write_u64(memory, resolution_ptr, resolution) {
+        interp.push(Value::I32(wasi_ctx::ERRNO_FAULT as u32));
+        return None;
+    }
+    interp.push(Value::I32(wasi_ctx::ERRNO_SUCCESS as u32));
+    None
+}
+
+fn wasi_clock_time_get(interp: &mut crate::runtime::Interpreter<'_>) -> Option<String> {
+    let time_ptr = pop_u32(interp)? as usize;
+    let _precision = pop_i64(interp)? as u64;
+    let clock_id = pop_u32(interp)?;
+    let now = match wasi_ctx::clock_time_get(clock_id) {
+        Ok(value) => value,
+        Err(errno) => {
+            interp.push(Value::I32(errno as u32));
+            return None;
+        }
+    };
+    let memory = interp.get_memory_mut();
+    if !write_u64(memory, time_ptr, now) {
+        interp.push(Value::I32(wasi_ctx::ERRNO_FAULT as u32));
+        return None;
+    }
     interp.push(Value::I32(wasi_ctx::ERRNO_SUCCESS as u32));
     None
 }
@@ -550,6 +598,20 @@ pub fn host_func(name: &str, sig: &Func) -> Result<Option<HostFunc>, &'static st
                 Ok(Some(Box::new(wasi_random_get)))
             } else {
                 Err("(i32, i32) -> (i32)")
+            }
+        }
+        "clock_res_get" => {
+            if signature_matches(sig, &[i32(), i32()], &[i32()]) {
+                Ok(Some(Box::new(wasi_clock_res_get)))
+            } else {
+                Err("(i32, i32) -> (i32)")
+            }
+        }
+        "clock_time_get" => {
+            if signature_matches(sig, &[i32(), i64(), i32()], &[i32()]) {
+                Ok(Some(Box::new(wasi_clock_time_get)))
+            } else {
+                Err("(i32, i64, i32) -> (i32)")
             }
         }
         "fd_readdir" => {
