@@ -222,7 +222,6 @@ pub use module_support::{ModuleCapabilityCensus, validate_wasm32_wasip1_proc_mac
 
 use proc_macro::TokenStream;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
 use std::sync::Arc;
 
 #[derive(Clone, Debug)]
@@ -316,7 +315,6 @@ impl WasmBytes {
 /// ```
 pub struct WasmMacro {
     wasm: WasmBytes,
-    id: AtomicUsize,
 }
 
 impl WasmMacro {
@@ -331,10 +329,7 @@ impl WasmMacro {
     /// # };
     /// ```
     pub const fn new(wasm: &'static [u8]) -> WasmMacro {
-        WasmMacro {
-            wasm: WasmBytes::Static(wasm),
-            id: AtomicUsize::new(0),
-        }
+        WasmMacro { wasm: WasmBytes::Static(wasm) }
     }
 
     /// Creates a new `WasmMacro` from an owned Vec of wasm bytes.
@@ -342,10 +337,7 @@ impl WasmMacro {
     /// This is added for rustc integration where WASM bytecode is loaded
     /// from disk rather than being statically included.
     pub fn new_owned(wasm: Vec<u8>) -> WasmMacro {
-        WasmMacro {
-            wasm: WasmBytes::Owned(Arc::new(wasm)),
-            id: AtomicUsize::new(0),
-        }
+        WasmMacro { wasm: WasmBytes::Owned(Arc::new(wasm)) }
     }
 
     /// Get the wasm bytes as a slice.
@@ -466,17 +458,5 @@ impl WasmMacro {
     ) -> TokenStream {
         wasi_ctx::reset_from_host();
         exec::proc_macro(fun, vec![args, input], self)
-    }
-
-    fn id(&self) -> usize {
-        static NEXT_ID: AtomicUsize = AtomicUsize::new(1);
-        match self.id.load(SeqCst) {
-            0 => {}
-            n => return n,
-        }
-        let id = NEXT_ID.fetch_add(1, SeqCst);
-        self.id
-            .compare_exchange(0, id, SeqCst, SeqCst)
-            .unwrap_or_else(|id| id)
     }
 }

@@ -8,33 +8,19 @@ use crate::runtime::{
 };
 use crate::WasmMacro;
 use proc_macro::TokenStream;
-use std::cell::RefCell;
-use std::collections::hash_map::{Entry, HashMap};
 use std::io::Cursor;
 use std::rc::Rc;
 
-struct ThreadState {
+struct RuntimeState {
     store: Store,
-    instances: HashMap<usize, Rc<ModuleInst>>,
 }
 
-std::thread_local! {
-    static STATE: RefCell<ThreadState> = {
-        RefCell::new(ThreadState {
-            store: init_store(),
-            instances: HashMap::new(),
-        })
-    };
-}
+impl RuntimeState {
+    fn new() -> Self {
+        Self { store: init_store() }
+    }
 
-impl ThreadState {
-    pub fn instance(&mut self, instance: &WasmMacro) -> &ModuleInst {
-        let id = instance.id();
-        let entry = match self.instances.entry(id) {
-            Entry::Occupied(e) => return e.into_mut(),
-            Entry::Vacant(v) => v,
-        };
-
+    pub fn instantiate(&mut self, instance: &WasmMacro) -> Rc<ModuleInst> {
         let cursor = Cursor::new(instance.wasm_bytes());
         let module = decode_module(cursor).unwrap_or_else(|e| {
             panic!("Failed to decode WASM module: {:?}", e);
@@ -49,39 +35,35 @@ impl ThreadState {
             panic!("Failed to resolve WASM imports: {:?}", e);
         });
 
-        let module_instance = instantiate_module(&mut self.store, module, &extern_vals)
-            .unwrap_or_else(|e| panic!("Failed to instantiate WASM module: {:?}", e));
-
-        entry.insert(module_instance)
+        instantiate_module(&mut self.store, module, &extern_vals)
+            .unwrap_or_else(|e| panic!("Failed to instantiate WASM module: {:?}", e))
     }
 }
 
 pub fn proc_macro(fun: &str, inputs: Vec<TokenStream>, instance: &WasmMacro) -> TokenStream {
-    STATE.with(|state| {
-        let state = &mut state.borrow_mut();
-        let instance = state.instance(instance);
-        let exports = Exports::collect(instance, fun);
+    let state = &mut RuntimeState::new();
+    let instance = state.instantiate(instance);
+    let exports = Exports::collect(&instance, fun);
 
-        let _guard = Data::guard();
-        let raws: Vec<Value> = Data::with(|d| {
-            inputs
-                .into_iter()
-                .map(|input| Value::I32(d.tokenstream.push(input)))
-                .collect()
-        });
-
-        let args: Vec<Value> = raws
+    let _guard = Data::guard();
+    let raws: Vec<Value> = Data::with(|d| {
+        inputs
             .into_iter()
-            .map(|raw| call(state, exports.raw_to_token_stream, vec![raw]))
-            .collect();
-        let output = call(state, exports.main, args);
-        let raw = call(state, exports.token_stream_into_raw, vec![output]);
-        let handle = match raw {
-            Value::I32(handle) => handle,
-            _ => panic!("unexpected macro return type: {:?}", raw),
-        };
-        Data::with(|d| d.tokenstream[handle].clone())
-    })
+            .map(|input| Value::I32(d.tokenstream.push(input)))
+            .collect()
+    });
+
+    let args: Vec<Value> = raws
+        .into_iter()
+        .map(|raw| call(state, exports.raw_to_token_stream, vec![raw]))
+        .collect();
+    let output = call(state, exports.main, args);
+    let raw = call(state, exports.token_stream_into_raw, vec![output]);
+    let handle = match raw {
+        Value::I32(handle) => handle,
+        _ => panic!("unexpected macro return type: {:?}", raw),
+    };
+    Data::with(|d| d.tokenstream[handle].clone())
 }
 
 struct Exports {
@@ -112,7 +94,7 @@ impl Exports {
     }
 }
 
-fn call(state: &mut ThreadState, func: FuncAddr, args: Vec<Value>) -> Value {
+fn call(state: &mut RuntimeState, func: FuncAddr, args: Vec<Value>) -> Value {
     match invoke_func(&mut state.store, func, args) {
         Ok(ret) => {
             assert_eq!(ret.len(), 1);
