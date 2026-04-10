@@ -134,7 +134,6 @@ impl<'a> Interpreter<'a> {
     /// This is the main dispatching function of the interpreter.
     fn instr(&mut self, instr: &Instr) -> IntResult {
         use super::ast::Instr::*;
-
         match *instr {
             Unreachable => self.unreachable(),
             Nop => self.nop(),
@@ -1047,9 +1046,12 @@ impl<'a> Interpreter<'a> {
 
         // Execute the function inside a block
         let old_frame = mem::replace(&mut self.frame, new_frame);
-        self.block(&f_inst.type_.result, &f_inst.code.body)?;
+        let block_result = self.block(&f_inst.type_.result, &f_inst.code.body);
         self.frame = old_frame;
-        self.call_stack.pop();
+        if matches!(block_result, Ok(_)) {
+            self.call_stack.pop();
+        }
+        block_result?;
 
         // Remove locals/args
         let drain_start = frame_begin;
@@ -1111,11 +1113,11 @@ impl<'a> Interpreter<'a> {
                 self.call_stack.push(addr);
             }
         }
-        match self.funcs[f_addr] {
-            FuncInst::Module(ref f_inst) => self.call_module(f_inst, f_addr)?,
-            FuncInst::Host(ref f_inst) => self.call_host(f_inst)?,
+        let result = match self.funcs[f_addr] {
+            FuncInst::Module(ref f_inst) => self.call_module(f_inst, f_addr),
+            FuncInst::Host(ref f_inst) => self.call_host(f_inst),
         };
-
+        result?;
         Ok(Continue)
     }
 

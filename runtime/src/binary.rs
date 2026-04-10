@@ -895,7 +895,7 @@ impl<R: Read> Decoder<R> {
     }
 
     fn read_code(&mut self) -> DecodeResult<(Vec<types::Value>, Expr)> {
-        let size = self.read_vu32()?;
+        let _size = self.read_vu32()?;
         // TODO: do not create intermediate vectors just to concatenate them
         let locals = match self.read_vec(Decoder::read_locals) {
             Ok(l) => {
@@ -919,12 +919,10 @@ impl<R: Read> Decoder<R> {
     fn read_code_section(&mut self) -> DecodeResult<Vec<(Vec<types::Value>, Expr)>> {
         let count = self.read_vu32()?;
         let mut result = Vec::with_capacity(count as usize);
-        for i in 0..count {
+        for _ in 0..count {
             match self.read_code() {
                 Ok(code) => result.push(code),
-                Err(e) => {
-                    return Err(e);
-                }
+                Err(e) => return Err(e),
             }
         }
         Ok(result)
@@ -970,7 +968,6 @@ impl<R: Read> Decoder<R> {
                 Err(e) => return Err(e),
                 Ok(id) => {
                     let size = self.read_vu32()?;
-
                     match id {
                         0 => {  self.skip_custom_section(size)?; }, // ignore custom sections
                         1 => {  types = self.read_type_section()?; },

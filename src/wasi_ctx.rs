@@ -21,14 +21,29 @@ pub const ERRNO_PERM: i32 = 63;
 const FILETYPE_CHARACTER_DEVICE: u8 = 2;
 const FILETYPE_DIRECTORY: u8 = 3;
 const FILETYPE_REGULAR_FILE: u8 = 4;
+const FILETYPE_SYMBOLIC_LINK: u8 = 7;
+const FILETYPE_UNKNOWN: u8 = 0;
 
 const PREOPENS_ENV: &str = "RUSTC_WATT_PREOPENS";
 const DETERMINISTIC_RANDOM_ENV: &str = "RUSTC_WATT_DETERMINISTIC_RANDOM";
 const RIGHTS_FD_WRITE: u64 = 1u64 << 6;
 
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Filestat {
+    pub dev: u64,
+    pub ino: u64,
+    pub filetype: u8,
+    pub nlink: u64,
+    pub size: u64,
+    pub atim: u64,
+    pub mtim: u64,
+    pub ctim: u64,
+}
+
 #[derive(Clone, Debug)]
 struct PreopenDir {
     root: PathBuf,
+    guest_path: String,
     writable: bool,
 }
 
@@ -38,6 +53,7 @@ enum FdEntry {
     Stdout,
     Stderr,
     PreopenDir(PreopenDir),
+    OpenDir { root: PathBuf, writable: bool },
     OpenFile { file: File, writable: bool },
 }
 
@@ -116,9 +132,13 @@ fn preopens_from_host() -> Vec<PreopenDir> {
             let Some((path, writable)) = parse_preopen_spec(entry) else {
                 continue;
             };
-            let root = PathBuf::from(path);
+            let root = PathBuf::from(path.clone());
             if let Some(canon) = canonicalize_dir(&root) {
-                out.push(PreopenDir { root: canon, writable });
+                out.push(PreopenDir {
+                    root: canon,
+                    guest_path: path,
+                    writable,
+                });
             }
         }
     }
@@ -128,7 +148,11 @@ fn preopens_from_host() -> Vec<PreopenDir> {
             if let Some(canon) = canonicalize_dir(&cwd) {
                 // Match native-like proc-macro behavior as closely as possible:
                 // default cwd preopen is writable unless caller narrows policy.
-                out.push(PreopenDir { root: canon, writable: true });
+                out.push(PreopenDir {
+                    root: canon,
+                    guest_path: cwd.to_string_lossy().to_string(),
+                    writable: true,
+                });
             }
         }
     }
@@ -138,8 +162,31 @@ fn preopens_from_host() -> Vec<PreopenDir> {
 fn preopens_from_policy(policy: &WasiPolicy) -> Vec<PreopenDir> {
     let mut out = Vec::new();
     for entry in &policy.preopens {
+        let guest_path = entry
+            .guest_path
+            .as_ref()
+            .unwrap_or(&entry.path)
+            .to_string_lossy()
+            .to_string();
         if let Some(canon) = canonicalize_dir(&entry.path) {
-            out.push(PreopenDir { root: canon, writable: entry.writable });
+            out.push(PreopenDir {
+                root: canon,
+                guest_path,
+                writable: entry.writable,
+            });
+            continue;
+        }
+
+        // Proc-macro WASI policy is constructed by rustc itself. Inside the outer
+        // rustc.wasm environment, canonicalize() can fail even for guest-visible
+        // absolute paths like `/` or `/.`, but those paths are still the right
+        // roots to hand to the nested proc-macro runtime.
+        if entry.path.is_absolute() {
+            out.push(PreopenDir {
+                root: entry.path.clone(),
+                guest_path,
+                writable: entry.writable,
+            });
         }
     }
     out
@@ -227,14 +274,46 @@ fn is_rel_path_safe(path: &Path) -> bool {
         .any(|c| matches!(c, Component::ParentDir | Component::RootDir | Component::Prefix(_)))
 }
 
-fn resolve_in_preopen(root: &Path, rel_path: &Path) -> Result<PathBuf, i32> {
-    if !is_rel_path_safe(rel_path) {
+fn normalize_rel_path(path: &Path) -> Result<PathBuf, i32> {
+    if !is_rel_path_safe(path) {
         return Err(ERRNO_PERM);
     }
 
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::Normal(part) => normalized.push(part),
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+                return Err(ERRNO_PERM);
+            }
+        }
+    }
+
+    Ok(normalized)
+}
+
+fn should_fallback_to_guest_path(root: &Path) -> bool {
+    if !root.is_absolute() {
+        return false;
+    }
+    if canonicalize_dir(root).is_some() {
+        return false;
+    }
+    std::fs::metadata(root).is_ok_and(|meta| meta.is_dir())
+}
+
+fn resolve_in_preopen(root: &Path, rel_path: &Path) -> Result<PathBuf, i32> {
+    let rel_path = normalize_rel_path(rel_path)?;
+    let allow_guest_fallback = should_fallback_to_guest_path(root);
+
     let joined = root.join(rel_path);
     if joined.exists() {
-        let canon = joined.canonicalize().map_err(|_| ERRNO_IO)?;
+        let canon = match joined.canonicalize() {
+            Ok(canon) => canon,
+            Err(_) if allow_guest_fallback => return Ok(joined),
+            Err(_) => return Err(ERRNO_IO),
+        };
         if !canon.starts_with(root) {
             return Err(ERRNO_PERM);
         }
@@ -242,7 +321,11 @@ fn resolve_in_preopen(root: &Path, rel_path: &Path) -> Result<PathBuf, i32> {
     }
 
     let parent = joined.parent().ok_or(ERRNO_PERM)?;
-    let parent_canon = parent.canonicalize().map_err(|_| ERRNO_NOENT)?;
+    let parent_canon = match parent.canonicalize() {
+        Ok(parent_canon) => parent_canon,
+        Err(_) if allow_guest_fallback => return Ok(joined),
+        Err(_) => return Err(ERRNO_NOENT),
+    };
     if !parent_canon.starts_with(root) {
         return Err(ERRNO_PERM);
     }
@@ -261,6 +344,117 @@ fn wants_write_access(oflags: u32, fdflags: u32, rights_base: u64) -> bool {
     let fd_writeish = fdflags != 0;
     let rights_write = (rights_base & RIGHTS_FD_WRITE) != 0;
     create_or_trunc || fd_writeish || rights_write
+}
+
+fn io_error_to_errno(err: &io::Error) -> i32 {
+    match err.kind() {
+        io::ErrorKind::NotFound => ERRNO_NOENT,
+        io::ErrorKind::PermissionDenied => ERRNO_PERM,
+        io::ErrorKind::InvalidInput => ERRNO_INVAL,
+        io::ErrorKind::NotADirectory => ERRNO_NOTDIR,
+        _ => ERRNO_IO,
+    }
+}
+
+fn metadata_to_filestat(meta: &std::fs::Metadata) -> Filestat {
+    let filetype = if meta.file_type().is_symlink() {
+        FILETYPE_SYMBOLIC_LINK
+    } else if meta.is_dir() {
+        FILETYPE_DIRECTORY
+    } else {
+        FILETYPE_REGULAR_FILE
+    };
+
+    Filestat {
+        dev: 0,
+        ino: 0,
+        filetype,
+        nlink: 1,
+        size: meta.len(),
+        atim: system_time_to_wasi_nanos(meta.accessed()),
+        mtim: system_time_to_wasi_nanos(meta.modified()),
+        ctim: system_time_to_wasi_nanos(meta.created()),
+    }
+}
+
+fn std_filetype_to_wasi(file_type: &std::fs::FileType) -> u8 {
+    if file_type.is_symlink() {
+        FILETYPE_SYMBOLIC_LINK
+    } else if file_type.is_dir() {
+        FILETYPE_DIRECTORY
+    } else if file_type.is_file() {
+        FILETYPE_REGULAR_FILE
+    } else {
+        FILETYPE_UNKNOWN
+    }
+}
+
+fn dir_root_from_entry(entry: &FdEntry) -> Result<(PathBuf, bool), i32> {
+    match entry {
+        FdEntry::PreopenDir(dir) => Ok((dir.root.clone(), dir.writable)),
+        FdEntry::OpenDir { root, writable } => Ok((root.clone(), *writable)),
+        _ => Err(ERRNO_NOTDIR),
+    }
+}
+
+fn resolve_existing_in_preopen(
+    root: &Path,
+    rel_path: &Path,
+    follow_symlink: bool,
+) -> Result<PathBuf, i32> {
+    let rel_path = normalize_rel_path(rel_path)?;
+    let allow_guest_fallback = should_fallback_to_guest_path(root);
+
+    if rel_path.as_os_str().is_empty() {
+        if follow_symlink {
+            let canon = match root.canonicalize() {
+                Ok(canon) => canon,
+                Err(_) if allow_guest_fallback => return Ok(root.to_path_buf()),
+                Err(err) => return Err(io_error_to_errno(&err)),
+            };
+            if !canon.starts_with(root) {
+                return Err(ERRNO_PERM);
+            }
+            return Ok(canon);
+        }
+        return Ok(root.to_path_buf());
+    }
+
+    let joined = root.join(rel_path);
+    if follow_symlink {
+        let canon = match joined.canonicalize() {
+            Ok(canon) => canon,
+            Err(_) if allow_guest_fallback => return Ok(joined),
+            Err(err) => return Err(io_error_to_errno(&err)),
+        };
+        if !canon.starts_with(root) {
+            return Err(ERRNO_PERM);
+        }
+        return Ok(canon);
+    }
+
+    let parent = joined.parent().ok_or(ERRNO_PERM)?;
+    let parent_canon = match parent.canonicalize() {
+        Ok(parent_canon) => parent_canon,
+        Err(_) if allow_guest_fallback => return Ok(joined),
+        Err(err) => return Err(io_error_to_errno(&err)),
+    };
+    if !parent_canon.starts_with(root) {
+        return Err(ERRNO_PERM);
+    }
+    Ok(parent_canon.join(
+        joined
+            .file_name()
+            .ok_or(ERRNO_INVAL)?
+            .to_string_lossy()
+            .to_string(),
+    ))
+}
+
+fn system_time_to_wasi_nanos(time: Result<SystemTime, io::Error>) -> u64 {
+    time.ok()
+        .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+        .map_or(0, |duration| duration.as_nanos().min(u64::MAX as u128) as u64)
 }
 
 std::thread_local! {
@@ -396,7 +590,7 @@ pub(crate) fn fd_close(fd: u32) -> Result<(), i32> {
             Some(FdEntry::Stdin | FdEntry::Stdout | FdEntry::Stderr | FdEntry::PreopenDir(_)) => {
                 Err(ERRNO_BADF)
             }
-            Some(FdEntry::OpenFile { .. }) => {
+            Some(FdEntry::OpenDir { .. } | FdEntry::OpenFile { .. }) => {
                 *slot = None;
                 Ok(())
             }
@@ -433,10 +627,69 @@ pub(crate) fn fd_filetype(fd: u32) -> Result<u8, i32> {
         let entry = ctx.fd_entry(fd).ok_or(ERRNO_BADF)?;
         let ty = match entry {
             FdEntry::Stdin | FdEntry::Stdout | FdEntry::Stderr => FILETYPE_CHARACTER_DEVICE,
-            FdEntry::PreopenDir(_) => FILETYPE_DIRECTORY,
+            FdEntry::PreopenDir(_) | FdEntry::OpenDir { .. } => FILETYPE_DIRECTORY,
             FdEntry::OpenFile { .. } => FILETYPE_REGULAR_FILE,
         };
         Ok(ty)
+    })
+}
+
+pub(crate) fn fd_filestat(fd: u32) -> Result<Filestat, i32> {
+    CTX.with(|ctx| {
+        let ctx = ctx.borrow();
+        let entry = ctx.fd_entry(fd).ok_or(ERRNO_BADF)?;
+
+        let stat = match entry {
+            FdEntry::Stdin | FdEntry::Stdout | FdEntry::Stderr => Filestat {
+                dev: 0,
+                ino: 0,
+                filetype: FILETYPE_CHARACTER_DEVICE,
+                nlink: 1,
+                size: 0,
+                atim: 0,
+                mtim: 0,
+                ctim: 0,
+            },
+            FdEntry::PreopenDir(dir) => {
+                let meta = std::fs::metadata(&dir.root).map_err(|_| ERRNO_IO)?;
+                let mut stat = metadata_to_filestat(&meta);
+                stat.filetype = FILETYPE_DIRECTORY;
+                stat
+            }
+            FdEntry::OpenDir { root, .. } => {
+                let meta = std::fs::metadata(root).map_err(|_| ERRNO_IO)?;
+                let mut stat = metadata_to_filestat(&meta);
+                stat.filetype = FILETYPE_DIRECTORY;
+                stat
+            }
+            FdEntry::OpenFile { file, .. } => {
+                let meta = file.metadata().map_err(|_| ERRNO_IO)?;
+                metadata_to_filestat(&meta)
+            }
+        };
+
+        Ok(stat)
+    })
+}
+
+pub(crate) fn path_filestat(dirfd: u32, lookupflags: u32, rel_path: &[u8]) -> Result<Filestat, i32> {
+    let rel = std::str::from_utf8(rel_path).map_err(|_| ERRNO_INVAL)?;
+    let rel_path = Path::new(rel);
+    let follow_symlink = (lookupflags & 1) != 0;
+
+    CTX.with(|ctx| {
+        let ctx = ctx.borrow();
+        let entry = ctx.fd_entry(dirfd).ok_or(ERRNO_BADF)?;
+        let (root, _) = dir_root_from_entry(entry)?;
+        let full = resolve_existing_in_preopen(&root, rel_path, follow_symlink)?;
+        let meta = if follow_symlink {
+            std::fs::metadata(&full)
+        } else {
+            std::fs::symlink_metadata(&full)
+        }
+        .map_err(|err| io_error_to_errno(&err))?;
+
+        Ok(metadata_to_filestat(&meta))
     })
 }
 
@@ -453,21 +706,27 @@ pub(crate) fn path_open(
 
     CTX.with(|ctx| {
         let mut ctx = ctx.borrow_mut();
-        let preopen = match ctx.fd_entry(dirfd).ok_or(ERRNO_BADF)? {
-            FdEntry::PreopenDir(dir) => dir.clone(),
-            _ => return Err(ERRNO_NOTDIR),
-        };
+        let entry = ctx.fd_entry(dirfd).ok_or(ERRNO_BADF)?;
+        let (root, writable) = dir_root_from_entry(entry)?;
 
-        if write_requested && !preopen.writable {
+        if write_requested && !writable {
             return Err(ERRNO_PERM);
         }
+        let want_directory = (oflags & 0x2) != 0;
+        let full = if want_directory {
+            let follow_symlink = false;
+            resolve_existing_in_preopen(&root, rel_path, follow_symlink)?
+        } else {
+            resolve_in_preopen(&root, rel_path)?
+        };
 
-        // Disallow directory-only opens for now.
-        if (oflags & 0x2) != 0 {
-            return Err(ERRNO_NOSYS);
+        if want_directory {
+            let meta = std::fs::metadata(&full).map_err(|err| io_error_to_errno(&err))?;
+            if !meta.is_dir() {
+                return Err(ERRNO_NOTDIR);
+            }
+            return Ok(ctx.alloc_fd(FdEntry::OpenDir { root: full, writable }));
         }
-
-        let full = resolve_in_preopen(&preopen.root, rel_path)?;
 
         let mut opts = OpenOptions::new();
         opts.read(true);
@@ -481,17 +740,66 @@ pub(crate) fn path_open(
             }
         }
 
-        let file = opts.open(full).map_err(|_| ERRNO_IO)?;
-        let fd = ctx.alloc_fd(FdEntry::OpenFile { file, writable: write_requested });
-        Ok(fd)
+        let file = opts.open(&full).map_err(|_| ERRNO_IO)?;
+        Ok(ctx.alloc_fd(FdEntry::OpenFile { file, writable: write_requested }))
+    })
+}
+
+pub(crate) fn fd_readdir(fd: u32, cookie: u64, buf: &mut [u8]) -> Result<u32, i32> {
+    CTX.with(|ctx| {
+        let ctx = ctx.borrow();
+        let (root, _) = dir_root_from_entry(ctx.fd_entry(fd).ok_or(ERRNO_BADF)?)?;
+        let mut host_entries = Vec::new();
+        for entry in std::fs::read_dir(&root).map_err(|err| io_error_to_errno(&err))? {
+            let entry = entry.map_err(|err| io_error_to_errno(&err))?;
+            let file_type = entry.file_type().map_err(|err| io_error_to_errno(&err))?;
+            host_entries.push((entry.file_name().to_string_lossy().as_bytes().to_vec(), std_filetype_to_wasi(&file_type)));
+        }
+        host_entries.sort_by(|a, b| a.0.cmp(&b.0));
+
+        let mut written = 0usize;
+        for (idx, (name, filetype)) in host_entries.iter().enumerate().skip(cookie as usize) {
+            let header_len = 24usize;
+            let available = buf.len().saturating_sub(written);
+            if available < header_len {
+                // std's WASI ReadDir treats a short final chunk as EOF. If more
+                // entries remain but there is not enough space for another dirent
+                // header, pad the buffer to signal the caller to reissue with the
+                // last completed cookie.
+                written = buf.len();
+                break;
+            }
+
+            let next_cookie = (idx + 1) as u64;
+            let header = &mut buf[written..written + header_len];
+            header.fill(0);
+            header[0..8].copy_from_slice(&next_cookie.to_le_bytes());
+            header[8..16].copy_from_slice(&0u64.to_le_bytes());
+            header[16..20].copy_from_slice(&(name.len() as u32).to_le_bytes());
+            header[20] = *filetype;
+            written += header_len;
+
+            let writable_name = name.len().min(buf.len().saturating_sub(written));
+            buf[written..written + writable_name].copy_from_slice(&name[..writable_name]);
+            written += writable_name;
+
+            if writable_name < name.len() {
+                break;
+            }
+        }
+
+        Ok(written as u32)
     })
 }
 
 pub(crate) fn fd_prestat_dir(fd: u32) -> Result<u32, i32> {
     CTX.with(|ctx| {
         let ctx = ctx.borrow();
-        match ctx.fd_entry(fd).ok_or(ERRNO_BADF)? {
-            FdEntry::PreopenDir(dir) => Ok(dir.root.to_string_lossy().len() as u32),
+        let Some(entry) = ctx.fd_entry(fd) else {
+            return Err(ERRNO_BADF);
+        };
+        match entry {
+            FdEntry::PreopenDir(dir) => Ok(dir.guest_path.len() as u32),
             _ => Err(ERRNO_BADF),
         }
     })
@@ -501,7 +809,7 @@ pub(crate) fn fd_prestat_dir_name(fd: u32) -> Result<Vec<u8>, i32> {
     CTX.with(|ctx| {
         let ctx = ctx.borrow();
         match ctx.fd_entry(fd).ok_or(ERRNO_BADF)? {
-            FdEntry::PreopenDir(dir) => Ok(dir.root.to_string_lossy().as_bytes().to_vec()),
+            FdEntry::PreopenDir(dir) => Ok(dir.guest_path.as_bytes().to_vec()),
             _ => Err(ERRNO_BADF),
         }
     })
@@ -548,7 +856,11 @@ pub(crate) fn set_for_test(env_entries: Vec<Vec<u8>>, mirror_stdio: bool) {
         let mut fds = vec![Some(FdEntry::Stdin), Some(FdEntry::Stdout), Some(FdEntry::Stderr)];
         if let Ok(cwd) = std::env::current_dir() {
             if let Some(canon) = canonicalize_dir(&cwd) {
-                fds.push(Some(FdEntry::PreopenDir(PreopenDir { root: canon, writable: false })));
+                fds.push(Some(FdEntry::PreopenDir(PreopenDir {
+                    root: canon.clone(),
+                    guest_path: canon.to_string_lossy().to_string(),
+                    writable: false,
+                })));
             }
         }
         *ctx.borrow_mut() = WasiProcMacroCtx {
@@ -575,7 +887,11 @@ pub(crate) fn set_for_test_with_preopens(
         let mut fds = vec![Some(FdEntry::Stdin), Some(FdEntry::Stdout), Some(FdEntry::Stderr)];
         for (root, writable) in preopens {
             if let Some(canon) = canonicalize_dir(&root) {
-                fds.push(Some(FdEntry::PreopenDir(PreopenDir { root: canon, writable })));
+                fds.push(Some(FdEntry::PreopenDir(PreopenDir {
+                    root: canon.clone(),
+                    guest_path: canon.to_string_lossy().to_string(),
+                    writable,
+                })));
             }
         }
         *ctx.borrow_mut() = WasiProcMacroCtx {
@@ -603,7 +919,11 @@ pub(crate) fn set_for_test_full(
         let mut fds = vec![Some(FdEntry::Stdin), Some(FdEntry::Stdout), Some(FdEntry::Stderr)];
         if let Ok(cwd) = std::env::current_dir() {
             if let Some(canon) = canonicalize_dir(&cwd) {
-                fds.push(Some(FdEntry::PreopenDir(PreopenDir { root: canon, writable: true })));
+                fds.push(Some(FdEntry::PreopenDir(PreopenDir {
+                    root: canon.clone(),
+                    guest_path: canon.to_string_lossy().to_string(),
+                    writable: true,
+                })));
             }
         }
         *ctx.borrow_mut() = WasiProcMacroCtx {
@@ -686,7 +1006,11 @@ mod tests {
                 Some(FdEntry::Stdin),
                 Some(FdEntry::Stdout),
                 Some(FdEntry::Stderr),
-                Some(FdEntry::PreopenDir(PreopenDir { root: dir.clone(), writable: false })),
+                Some(FdEntry::PreopenDir(PreopenDir {
+                    root: dir.clone(),
+                    guest_path: dir.to_string_lossy().to_string(),
+                    writable: false,
+                })),
             ],
         };
 
@@ -762,6 +1086,131 @@ mod tests {
         assert_eq!(name, dir.to_string_lossy().as_bytes());
     }
 
+    #[test]
+    fn fd_prestat_can_report_guest_visible_name() {
+        let dir = mk_tmp_dir().canonicalize().unwrap();
+
+        CTX.with(|ctx| {
+            *ctx.borrow_mut() = WasiProcMacroCtx {
+                args_entries: Vec::new(),
+                env_entries: Vec::new(),
+                stdout_capture: Vec::new(),
+                stderr_capture: Vec::new(),
+                mirror_stdio: false,
+                deterministic_random: false,
+                random_state: std::collections::hash_map::RandomState::new(),
+                random_counter: 0,
+                fds: vec![
+                    Some(FdEntry::Stdin),
+                    Some(FdEntry::Stdout),
+                    Some(FdEntry::Stderr),
+                    Some(FdEntry::PreopenDir(PreopenDir {
+                        root: dir,
+                        guest_path: "/./".to_string(),
+                        writable: false,
+                    })),
+                ],
+            };
+        });
+
+        let len = fd_prestat_dir(3).unwrap();
+        let name = fd_prestat_dir_name(3).unwrap();
+        assert_eq!(len as usize, "/./".len());
+        assert_eq!(name, b"/./");
+    }
+
+    #[test]
+    fn path_filestat_reads_relative_metadata() {
+        let dir = mk_tmp_dir();
+        let file = dir.join("meta.txt");
+        std::fs::write(&file, b"hello").unwrap();
+        set_for_test_with_preopens(Vec::new(), false, vec![(dir.clone(), false)]);
+
+        let stat = path_filestat(3, 1, b"meta.txt").unwrap();
+        assert_eq!(stat.filetype, FILETYPE_REGULAR_FILE);
+        assert_eq!(stat.size, 5);
+    }
+
+    #[test]
+    fn directory_open_and_readdir_work() {
+        let dir = mk_tmp_dir();
+        let child = dir.join("wit");
+        std::fs::create_dir(&child).unwrap();
+        std::fs::write(child.join("a.wit"), b"package a:b;").unwrap();
+        std::fs::write(child.join("b.wit"), b"package a:c;").unwrap();
+        set_for_test_with_preopens(Vec::new(), false, vec![(dir.clone(), false)]);
+
+        let fd = path_open(3, b"wit", 0x2, 0, 0).unwrap();
+        assert_eq!(fd_filetype(fd).unwrap(), FILETYPE_DIRECTORY);
+
+        let mut buf = vec![0u8; 256];
+        let used = fd_readdir(fd, 0, &mut buf).unwrap() as usize;
+        assert!(used > 0);
+        let bytes = &buf[..used];
+        assert!(bytes.windows(5).any(|w| w == b"a.wit"));
+        assert!(bytes.windows(5).any(|w| w == b"b.wit"));
+        fd_close(fd).unwrap();
+    }
+
+    #[test]
+    fn directory_readdir_paginates_small_std_style_buffers() {
+        let dir = mk_tmp_dir();
+        let deps = dir.join("wit").join("deps");
+        std::fs::create_dir_all(&deps).unwrap();
+        for name in [
+            "wasi-cli-0.2.0",
+            "wasi-clocks-0.2.0",
+            "wasi-http-0.2.0",
+            "wasi-io-0.2.0",
+            "wasi-random-0.2.0",
+        ] {
+            std::fs::create_dir(deps.join(name)).unwrap();
+        }
+        set_for_test_with_preopens(Vec::new(), false, vec![(dir.clone(), false)]);
+
+        let fd = path_open(3, b"wit/deps", 0x2, 0, 0).unwrap();
+        let mut buf = vec![0u8; 128];
+        let used = fd_readdir(fd, 0, &mut buf).unwrap() as usize;
+        assert_eq!(used, buf.len());
+        let bytes = &buf[..used];
+        assert!(bytes.windows(b"wasi-http-0.2.0".len()).any(|w| w == b"wasi-http-0.2.0"));
+
+        // `3` is the cookie of the last complete entry from the first page:
+        // wasi-cli, wasi-clocks, wasi-http.
+        let used2 = fd_readdir(fd, 3, &mut buf).unwrap() as usize;
+        assert!(used2 > 0);
+        let bytes2 = &buf[..used2];
+        assert!(bytes2.windows(b"wasi-io-0.2.0".len()).any(|w| w == b"wasi-io-0.2.0"));
+        assert!(
+            bytes2
+                .windows(b"wasi-random-0.2.0".len())
+                .any(|w| w == b"wasi-random-0.2.0")
+        );
+        fd_close(fd).unwrap();
+    }
+
+    #[test]
+    fn relative_paths_ignore_current_dir_segments() {
+        let dir = mk_tmp_dir();
+        let child = dir.join("wit");
+        std::fs::create_dir(&child).unwrap();
+        std::fs::write(child.join("world.wit"), b"package test:component;").unwrap();
+        set_for_test_with_preopens(Vec::new(), false, vec![(dir.clone(), false)]);
+
+        let stat = path_filestat(3, 1, b"./wit").unwrap();
+        assert_eq!(stat.filetype, FILETYPE_DIRECTORY);
+
+        let fd = path_open(3, b"./wit/world.wit", 0, 0, 0).unwrap();
+        assert!(fd >= 4);
+        CTX.with(|ctx| {
+            assert!(matches!(
+                ctx.borrow().fd_entry(fd).unwrap(),
+                FdEntry::OpenFile { .. }
+            ));
+        });
+        fd_close(fd).unwrap();
+    }
+
     #[cfg(unix)]
     #[test]
     fn path_open_denies_symlink_breakout() {
@@ -830,12 +1279,34 @@ mod tests {
         policy.inherit_env = false;
         policy.preopens = vec![WasiPreopenDir {
             path: std::env::current_dir().unwrap(),
+            guest_path: None,
             writable: false,
         }];
         set_policy(policy);
 
         assert!(args_entries().is_empty());
         assert!(environ_entries().is_empty());
+
+        clear_policy();
+    }
+
+    #[test]
+    fn policy_preopen_can_override_guest_visible_name() {
+        let _lock = policy_lock();
+        let dir = mk_tmp_dir().canonicalize().unwrap();
+
+        let mut policy = WasiPolicy::native_like();
+        policy.preopens = vec![WasiPreopenDir {
+            path: dir,
+            guest_path: Some(PathBuf::from("/.")),
+            writable: false,
+        }];
+        set_policy(policy);
+
+        let len = fd_prestat_dir(3).unwrap();
+        let name = fd_prestat_dir_name(3).unwrap();
+        assert_eq!(len as usize, "/.".len());
+        assert_eq!(name, b"/.");
 
         clear_policy();
     }

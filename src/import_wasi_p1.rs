@@ -389,6 +389,82 @@ fn wasi_fd_fdstat_get(interp: &mut crate::runtime::Interpreter<'_>) -> Option<St
     None
 }
 
+fn wasi_fd_filestat_get(interp: &mut crate::runtime::Interpreter<'_>) -> Option<String> {
+    let stat_ptr = pop_u32(interp)? as usize;
+    let fd = pop_u32(interp)?;
+    let stat = match wasi_ctx::fd_filestat(fd) {
+        Ok(v) => v,
+        Err(errno) => {
+            interp.push(Value::I32(errno as u32));
+            return None;
+        }
+    };
+
+    let memory = interp.get_memory_mut();
+    let end = stat_ptr.saturating_add(64);
+    if end > memory.len() {
+        interp.push(Value::I32(wasi_ctx::ERRNO_FAULT as u32));
+        return None;
+    }
+
+    memory[stat_ptr..end].fill(0);
+    memory[stat_ptr..stat_ptr + 8].copy_from_slice(&stat.dev.to_le_bytes());
+    memory[stat_ptr + 8..stat_ptr + 16].copy_from_slice(&stat.ino.to_le_bytes());
+    memory[stat_ptr + 16] = stat.filetype;
+    memory[stat_ptr + 24..stat_ptr + 32].copy_from_slice(&stat.nlink.to_le_bytes());
+    memory[stat_ptr + 32..stat_ptr + 40].copy_from_slice(&stat.size.to_le_bytes());
+    memory[stat_ptr + 40..stat_ptr + 48].copy_from_slice(&stat.atim.to_le_bytes());
+    memory[stat_ptr + 48..stat_ptr + 56].copy_from_slice(&stat.mtim.to_le_bytes());
+    memory[stat_ptr + 56..stat_ptr + 64].copy_from_slice(&stat.ctim.to_le_bytes());
+    interp.push(Value::I32(wasi_ctx::ERRNO_SUCCESS as u32));
+    None
+}
+
+fn wasi_path_filestat_get(interp: &mut crate::runtime::Interpreter<'_>) -> Option<String> {
+    let stat_ptr = pop_u32(interp)? as usize;
+    let path_len = pop_u32(interp)? as usize;
+    let path_ptr = pop_u32(interp)? as usize;
+    let lookupflags = pop_u32(interp)?;
+    let dirfd = pop_u32(interp)?;
+
+    let path_bytes = {
+        let memory = interp.get_memory_mut();
+        let end = path_ptr.saturating_add(path_len);
+        if end > memory.len() {
+            interp.push(Value::I32(wasi_ctx::ERRNO_FAULT as u32));
+            return None;
+        }
+        memory[path_ptr..end].to_vec()
+    };
+
+    let stat = match wasi_ctx::path_filestat(dirfd, lookupflags, &path_bytes) {
+        Ok(v) => v,
+        Err(errno) => {
+            interp.push(Value::I32(errno as u32));
+            return None;
+        }
+    };
+
+    let memory = interp.get_memory_mut();
+    let end = stat_ptr.saturating_add(64);
+    if end > memory.len() {
+        interp.push(Value::I32(wasi_ctx::ERRNO_FAULT as u32));
+        return None;
+    }
+
+    memory[stat_ptr..end].fill(0);
+    memory[stat_ptr..stat_ptr + 8].copy_from_slice(&stat.dev.to_le_bytes());
+    memory[stat_ptr + 8..stat_ptr + 16].copy_from_slice(&stat.ino.to_le_bytes());
+    memory[stat_ptr + 16] = stat.filetype;
+    memory[stat_ptr + 24..stat_ptr + 32].copy_from_slice(&stat.nlink.to_le_bytes());
+    memory[stat_ptr + 32..stat_ptr + 40].copy_from_slice(&stat.size.to_le_bytes());
+    memory[stat_ptr + 40..stat_ptr + 48].copy_from_slice(&stat.atim.to_le_bytes());
+    memory[stat_ptr + 48..stat_ptr + 56].copy_from_slice(&stat.mtim.to_le_bytes());
+    memory[stat_ptr + 56..stat_ptr + 64].copy_from_slice(&stat.ctim.to_le_bytes());
+    interp.push(Value::I32(wasi_ctx::ERRNO_SUCCESS as u32));
+    None
+}
+
 fn wasi_path_open(interp: &mut crate::runtime::Interpreter<'_>) -> Option<String> {
     let opened_fd_ptr = pop_u32(interp)? as usize;
     let fdflags = pop_u32(interp)?;
@@ -432,6 +508,39 @@ fn wasi_path_open(interp: &mut crate::runtime::Interpreter<'_>) -> Option<String
         interp.push(Value::I32(wasi_ctx::ERRNO_FAULT as u32));
         return None;
     }
+    interp.push(Value::I32(wasi_ctx::ERRNO_SUCCESS as u32));
+    None
+}
+
+fn wasi_fd_readdir(interp: &mut crate::runtime::Interpreter<'_>) -> Option<String> {
+    let bufused_ptr = pop_u32(interp)? as usize;
+    let cookie = pop_i64(interp)? as u64;
+    let buf_len = pop_u32(interp)? as usize;
+    let buf_ptr = pop_u32(interp)? as usize;
+    let fd = pop_u32(interp)?;
+
+    let used = {
+        let memory = interp.get_memory_mut();
+        let end = buf_ptr.saturating_add(buf_len);
+        if end > memory.len() {
+            interp.push(Value::I32(wasi_ctx::ERRNO_FAULT as u32));
+            return None;
+        }
+        match wasi_ctx::fd_readdir(fd, cookie, &mut memory[buf_ptr..end]) {
+            Ok(v) => v,
+            Err(errno) => {
+                interp.push(Value::I32(errno as u32));
+                return None;
+            }
+        }
+    };
+
+    let memory = interp.get_memory_mut();
+    if !write_u32(memory, bufused_ptr, used) {
+        interp.push(Value::I32(wasi_ctx::ERRNO_FAULT as u32));
+        return None;
+    }
+
     interp.push(Value::I32(wasi_ctx::ERRNO_SUCCESS as u32));
     None
 }
@@ -558,6 +667,13 @@ pub fn host_func(name: &str, sig: &Func) -> Result<Option<HostFunc>, &'static st
                 Err("(i32, i32) -> (i32)")
             }
         }
+        "fd_filestat_get" => {
+            if signature_matches(sig, &[i32(), i32()], &[i32()]) {
+                Ok(Some(Box::new(wasi_fd_filestat_get)))
+            } else {
+                Err("(i32, i32) -> (i32)")
+            }
+        }
         "path_open" => {
             if signature_matches(
                 sig,
@@ -577,6 +693,13 @@ pub fn host_func(name: &str, sig: &Func) -> Result<Option<HostFunc>, &'static st
                 Ok(Some(Box::new(wasi_path_open)))
             } else {
                 Err("(i32, i32, i32, i32, i32, i64, i64, i32, i32) -> (i32)")
+            }
+        }
+        "path_filestat_get" => {
+            if signature_matches(sig, &[i32(), i32(), i32(), i32(), i32()], &[i32()]) {
+                Ok(Some(Box::new(wasi_path_filestat_get)))
+            } else {
+                Err("(i32, i32, i32, i32, i32) -> (i32)")
             }
         }
         "fd_prestat_get" => {
@@ -616,15 +739,7 @@ pub fn host_func(name: &str, sig: &Func) -> Result<Option<HostFunc>, &'static st
         }
         "fd_readdir" => {
             if signature_matches(sig, &[i32(), i32(), i32(), i64(), i32()], &[i32()]) {
-                Ok(Some(Box::new(|interp| {
-                    let _ = pop_u32(interp);
-                    let _ = pop_i64(interp);
-                    let _ = pop_u32(interp);
-                    let _ = pop_u32(interp);
-                    let _ = pop_u32(interp);
-                    interp.push(Value::I32(wasi_ctx::ERRNO_NOSYS as u32));
-                    None
-                })))
+                Ok(Some(Box::new(wasi_fd_readdir)))
             } else {
                 Err("(i32, i32, i32, i64, i32) -> (i32)")
             }
@@ -659,9 +774,14 @@ mod tests {
     #[test]
     fn exposes_expected_proc_macro_subset() {
         let sig = Func { args: vec![i32(), i32()], result: vec![i32()] };
+        let path_sig = Func { args: vec![i32(), i32(), i32(), i32(), i32()], result: vec![i32()] };
+        let readdir_sig = Func { args: vec![i32(), i32(), i32(), super::i64(), i32()], result: vec![i32()] };
         assert!(host_func("environ_sizes_get", &sig).unwrap().is_some());
         assert!(host_func("environ_get", &sig).unwrap().is_some());
         assert!(host_func("args_get", &sig).unwrap().is_some());
+        assert!(host_func("fd_filestat_get", &sig).unwrap().is_some());
+        assert!(host_func("path_filestat_get", &path_sig).unwrap().is_some());
+        assert!(host_func("fd_readdir", &readdir_sig).unwrap().is_some());
         assert!(host_func("not_supported", &sig).unwrap().is_none());
     }
 

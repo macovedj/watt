@@ -113,59 +113,62 @@ fn collect_expr_capabilities(
     features: &mut BTreeSet<String>,
     instructions: &mut BTreeSet<String>,
 ) -> Result<(), Error> {
-    for instr in expr {
-        match instr {
-            Instr::Block(_, body) | Instr::Loop(_, body) => {
-                collect_expr_capabilities(body, features, instructions)?;
-            }
-            Instr::If(_, then_body, else_body) => {
-                collect_expr_capabilities(then_body, features, instructions)?;
-                collect_expr_capabilities(else_body, features, instructions)?;
-            }
-            Instr::RefNull | Instr::RefIsNull | Instr::RefFunc(_) => {
-                features.insert("reference-types".to_string());
-                let opname = match instr {
-                    Instr::RefNull => "ref.null",
-                    Instr::RefIsNull => "ref.is_null",
-                    Instr::RefFunc(_) => "ref.func",
-                    _ => unreachable!(),
-                };
-                instructions.insert(opname.to_string());
-            }
-            Instr::MemoryCopy | Instr::MemoryFill => {
-                features.insert("bulk-memory".to_string());
-                let opname = match instr {
-                    Instr::MemoryCopy => "memory.copy",
-                    Instr::MemoryFill => "memory.fill",
-                    _ => unreachable!(),
-                };
-                instructions.insert(opname.to_string());
-            }
-            Instr::MemoryInit(_) => return Err(Error::UnsupportedInstruction("memory.init")),
-            Instr::DataDrop(_) => return Err(Error::UnsupportedInstruction("data.drop")),
-            Instr::TableInit(_, _) => return Err(Error::UnsupportedInstruction("table.init")),
-            Instr::ElemDrop(_) => return Err(Error::UnsupportedInstruction("elem.drop")),
-            Instr::TableCopy(_, _) => return Err(Error::UnsupportedInstruction("table.copy")),
-            Instr::TableGrow(_) => return Err(Error::UnsupportedInstruction("table.grow")),
-            Instr::TableSize(_) => return Err(Error::UnsupportedInstruction("table.size")),
-            Instr::TableFill(_) => return Err(Error::UnsupportedInstruction("table.fill")),
-            Instr::IUnary(_, op) => {
-                let opname = match op {
-                    crate::runtime::ast::IUnOp::Extend8S => Some("i.extend8_s"),
-                    crate::runtime::ast::IUnOp::Extend16S => Some("i.extend16_s"),
-                    crate::runtime::ast::IUnOp::Extend32S => Some("i64.extend32_s"),
-                    _ => None,
-                };
-                if let Some(opname) = opname {
-                    features.insert("sign-ext".to_string());
+    let mut pending = vec![expr];
+    while let Some(expr) = pending.pop() {
+        for instr in expr {
+            match instr {
+                Instr::Block(_, body) | Instr::Loop(_, body) => {
+                    pending.push(body);
+                }
+                Instr::If(_, then_body, else_body) => {
+                    pending.push(else_body);
+                    pending.push(then_body);
+                }
+                Instr::RefNull | Instr::RefIsNull | Instr::RefFunc(_) => {
+                    features.insert("reference-types".to_string());
+                    let opname = match instr {
+                        Instr::RefNull => "ref.null",
+                        Instr::RefIsNull => "ref.is_null",
+                        Instr::RefFunc(_) => "ref.func",
+                        _ => unreachable!(),
+                    };
                     instructions.insert(opname.to_string());
                 }
+                Instr::MemoryCopy | Instr::MemoryFill => {
+                    features.insert("bulk-memory".to_string());
+                    let opname = match instr {
+                        Instr::MemoryCopy => "memory.copy",
+                        Instr::MemoryFill => "memory.fill",
+                        _ => unreachable!(),
+                    };
+                    instructions.insert(opname.to_string());
+                }
+                Instr::MemoryInit(_) => return Err(Error::UnsupportedInstruction("memory.init")),
+                Instr::DataDrop(_) => return Err(Error::UnsupportedInstruction("data.drop")),
+                Instr::TableInit(_, _) => return Err(Error::UnsupportedInstruction("table.init")),
+                Instr::ElemDrop(_) => return Err(Error::UnsupportedInstruction("elem.drop")),
+                Instr::TableCopy(_, _) => return Err(Error::UnsupportedInstruction("table.copy")),
+                Instr::TableGrow(_) => return Err(Error::UnsupportedInstruction("table.grow")),
+                Instr::TableSize(_) => return Err(Error::UnsupportedInstruction("table.size")),
+                Instr::TableFill(_) => return Err(Error::UnsupportedInstruction("table.fill")),
+                Instr::IUnary(_, op) => {
+                    let opname = match op {
+                        crate::runtime::ast::IUnOp::Extend8S => Some("i.extend8_s"),
+                        crate::runtime::ast::IUnOp::Extend16S => Some("i.extend16_s"),
+                        crate::runtime::ast::IUnOp::Extend32S => Some("i64.extend32_s"),
+                        _ => None,
+                    };
+                    if let Some(opname) = opname {
+                        features.insert("sign-ext".to_string());
+                        instructions.insert(opname.to_string());
+                    }
+                }
+                Instr::Convert(crate::runtime::ast::ConvertOp::TruncSat { .. }) => {
+                    features.insert("nontrapping-fptoint".to_string());
+                    instructions.insert("trunc_sat".to_string());
+                }
+                _ => {}
             }
-            Instr::Convert(crate::runtime::ast::ConvertOp::TruncSat { .. }) => {
-                features.insert("nontrapping-fptoint".to_string());
-                instructions.insert("trunc_sat".to_string());
-            }
-            _ => {}
         }
     }
     Ok(())

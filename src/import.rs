@@ -1,3 +1,4 @@
+use crate::data::Data;
 use crate::runtime::types::{Func, Int, Value};
 use crate::runtime::{func1, mem_func2, HostFunc, Store};
 use crate::sym;
@@ -59,7 +60,14 @@ pub fn host_func(name: &str, store: &Store, sig: &Func) -> Result<Option<HostFun
         }
         "print_panic" => {
             if signature_matches(sig, &[i32()], &[]) {
-                Ok(Some(func1(sym::print_panic, store)))
+                Ok(Some(Box::new(move |interp| {
+                    let string = match interp.pop() {
+                        Some(crate::runtime::Value::I32(v)) => v,
+                        _ => panic!("unexpected value"),
+                    };
+                    let message = Data::with(|d| d.string[string].clone());
+                    Some(message)
+                })))
             } else {
                 Err("(i32) -> ()")
             }

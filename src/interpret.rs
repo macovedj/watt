@@ -6,6 +6,7 @@ use crate::runtime::{
     alloc_func, decode_module, get_export, init_store, instantiate_module, invoke_func,
     module_imports, types, Extern, ExternVal, FuncAddr, Module, ModuleInst, Store, Value,
 };
+use crate::runtime::interpreter::{Trap, TrapOrigin};
 use crate::WasmMacro;
 use proc_macro::TokenStream;
 use std::io::Cursor;
@@ -35,8 +36,9 @@ impl RuntimeState {
             panic!("Failed to resolve WASM imports: {:?}", e);
         });
 
-        instantiate_module(&mut self.store, module, &extern_vals)
-            .unwrap_or_else(|e| panic!("Failed to instantiate WASM module: {:?}", e))
+        let inst = instantiate_module(&mut self.store, module, &extern_vals)
+            .unwrap_or_else(|e| panic!("Failed to instantiate WASM module: {:?}", e));
+        inst
     }
 }
 
@@ -55,10 +57,10 @@ pub fn proc_macro(fun: &str, inputs: Vec<TokenStream>, instance: &WasmMacro) -> 
 
     let args: Vec<Value> = raws
         .into_iter()
-        .map(|raw| call(state, exports.raw_to_token_stream, vec![raw]))
+        .map(|raw| call(state, "raw_to_token_stream", exports.raw_to_token_stream, vec![raw]))
         .collect();
-    let output = call(state, exports.main, args);
-    let raw = call(state, exports.token_stream_into_raw, vec![output]);
+    let output = call(state, fun, exports.main, args);
+    let raw = call(state, "token_stream_into_raw", exports.token_stream_into_raw, vec![output]);
     let handle = match raw {
         Value::I32(handle) => handle,
         _ => panic!("unexpected macro return type: {:?}", raw),
@@ -94,12 +96,15 @@ impl Exports {
     }
 }
 
-fn call(state: &mut RuntimeState, func: FuncAddr, args: Vec<Value>) -> Value {
+fn call(state: &mut RuntimeState, _label: &str, func: FuncAddr, args: Vec<Value>) -> Value {
     match invoke_func(&mut state.store, func, args) {
         Ok(ret) => {
             assert_eq!(ret.len(), 1);
             ret.into_iter().next().unwrap()
         }
+        Err(crate::runtime::Error::CodeTrapped(Trap {
+            origin: TrapOrigin::HostFunction(message),
+        })) => panic!("{message}"),
         Err(err) => panic!("{:?}", err),
     }
 }
@@ -506,8 +511,9 @@ mod tests {
     }
 
     #[test]
-    fn executes_fd_prestat_queries_and_readdir_nosys() {
+    fn executes_fd_prestat_queries_and_readdir() {
         let dir = mk_tmp_dir().canonicalize().unwrap();
+        std::fs::write(dir.join("entry.txt"), b"hello").unwrap();
         let first_byte = dir.to_string_lossy().as_bytes()[0] as u32;
         wasi_ctx::set_for_test_with_preopens(Vec::new(), false, vec![(dir.clone(), false)]);
         let (mut store, inst) = instantiate_wat(
@@ -548,7 +554,7 @@ mod tests {
         assert_eq!(first, vec![Value::I32(first_byte)]);
 
         let errno = invoke_export(&mut store, &inst, "readdir_errno", Vec::new()).unwrap();
-        assert_eq!(errno, vec![Value::I32(wasi_ctx::ERRNO_NOSYS as u32)]);
+        assert_eq!(errno, vec![Value::I32(wasi_ctx::ERRNO_SUCCESS as u32)]);
     }
 
     #[test]

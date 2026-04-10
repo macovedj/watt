@@ -227,6 +227,7 @@ use std::sync::Arc;
 #[derive(Clone, Debug)]
 pub struct WasiPreopenDir {
     pub path: PathBuf,
+    pub guest_path: Option<PathBuf>,
     pub writable: bool,
 }
 
@@ -246,7 +247,12 @@ impl WasiPreopenDir {
         if path.is_empty() {
             return None;
         }
-        Some(Self { path: PathBuf::from(path), writable })
+        Some(Self { path: PathBuf::from(path), guest_path: None, writable })
+    }
+
+    pub fn with_guest_path(mut self, guest_path: impl Into<PathBuf>) -> Self {
+        self.guest_path = Some(guest_path.into());
+        self
     }
 }
 
@@ -264,7 +270,7 @@ impl WasiPolicy {
     pub fn native_like() -> Self {
         let mut preopens = Vec::new();
         if let Ok(cwd) = std::env::current_dir() {
-            preopens.push(WasiPreopenDir { path: cwd, writable: true });
+            preopens.push(WasiPreopenDir { path: cwd, guest_path: None, writable: true });
         }
         Self {
             preopens,

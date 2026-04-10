@@ -536,14 +536,12 @@ pub fn instantiate_module(
             ExternVal::Global(addr) => imported_globals.push(addr),
         }
     }
-
     // compute initial values for globals
     let global_vals = module
         .globals
         .iter()
         .map(|g| eval_const_expr(&store.globals, &imported_globals, &g.value))
         .collect();
-
     // check that the module does not try to init too many elements
     let mut elem_offsets = Vec::new();
     for elem in &module.elems {
@@ -569,7 +567,6 @@ pub fn instantiate_module(
             return Err(Error::ElemOffsetTooLarge(elem.index as usize));
         }
     }
-
     // check that the module does not try to init too much memory
     let mut data_offsets = Vec::new();
     for data in &module.data {
@@ -595,7 +592,6 @@ pub fn instantiate_module(
             return Err(Error::DataOffsetTooLarge(data.index as usize));
         }
     }
-
     // everything is correct, allocate and initialize the module
     allocate_and_init_module(
         store,
@@ -631,7 +627,6 @@ fn allocate_and_init_module(
     inst.table_addrs.extend(extern_tables);
     inst.mem_addrs.extend(extern_memories);
     inst.global_addrs.extend(extern_globals);
-
     // functions allocation
     // only allocate indices; initialization comes when the module is fully instantiated
     let fsi_min = store.funcs.len();
@@ -639,13 +634,11 @@ fn allocate_and_init_module(
     for addr in fsi_min..fsi_max {
         inst.func_addrs.push(FuncAddr::new(addr));
     }
-
     // tables allocation
     for tab in module.tables {
         inst.table_addrs
             .push(store.tables.alloc(&mut store.types_map, &tab.type_));
     }
-
     // tables initialization with elem segments
     assert_eq!(module.elems.len(), elem_offsets.len());
     for (elem, offset) in module.elems.iter().zip(elem_offsets.into_iter()) {
@@ -655,20 +648,17 @@ fn allocate_and_init_module(
             store.tables[inst.table_addrs[elem.index as usize]].elem[offset + i] = Some(funcaddr);
         }
     }
-
     // memories allocation
     for mem in module.memories {
         inst.mem_addrs
             .push(store.mems.alloc(&mut store.types_map, &mem.type_));
     }
-
     // memories initialization with data segments
     assert_eq!(module.data.len(), data_offsets.len());
     for (data, offset) in module.data.iter().zip(data_offsets.into_iter()) {
         let mem = &mut store.mems[inst.mem_addrs[data.index as usize]];
         mem.data[offset..offset + data.init.len()].copy_from_slice(&data.init);
     }
-
     // globals allocation
     assert_eq!(module.globals.len(), vals.len());
     for (global, val) in module.globals.iter().zip(vals.into_iter()) {
@@ -678,7 +668,6 @@ fn allocate_and_init_module(
                 .alloc(&mut store.types_map, &global.type_, val),
         );
     }
-
     // init exports
     for export in module.exports {
         let extern_val = match export.desc {
@@ -692,7 +681,6 @@ fn allocate_and_init_module(
             value: extern_val,
         });
     }
-
     // now that the module is fully instantiated, we can initialize the functions and put
     // them into the store
     let inst = Rc::new(inst);
@@ -702,12 +690,10 @@ fn allocate_and_init_module(
             .funcs
             .alloc_module(&mut store.types_map, type_, &inst, func);
     }
-
     // call the start function if it exists
     if let Some(idx) = module.start {
         let func_addr = inst.func_addrs[idx as usize];
         invoke_func(store, func_addr, Vec::new())?;
     }
-
     Ok(inst)
 }
