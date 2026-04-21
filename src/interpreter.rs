@@ -217,28 +217,23 @@ impl<'a> Interpreter<'a> {
                     Value::I32(n) => n as usize,
                     _ => unreachable!(),
                 };
-
+                
                 // Get memory
                 let mem = &mut self.mems[self.frame.module().mem_addrs[0]];
-
+                
                 // Check bounds
                 if src + size > mem.data.len() || dest + size > mem.data.len() {
                     return Err(Trap {
                         origin: TrapOrigin::StoreOutOfMemory,
                     });
                 }
-
+                
                 // Copy memory (handle overlapping regions)
-                if dest <= src {
-                    for i in 0..size {
-                        mem.data[dest + i] = mem.data[src + i];
-                    }
-                } else {
-                    for i in (0..size).rev() {
-                        mem.data[dest + i] = mem.data[src + i];
-                    }
+                for i in 0..size {
+                    let byte = mem.data[src + i];
+                    mem.data[dest + i] = byte;
                 }
-
+                
                 Ok(Continue)
             }
 
@@ -256,22 +251,22 @@ impl<'a> Interpreter<'a> {
                     Value::I32(n) => n as usize,
                     _ => unreachable!(),
                 };
-
+                
                 // Get memory
                 let mem = &mut self.mems[self.frame.module().mem_addrs[0]];
-
+                
                 // Check bounds
                 if dest + size > mem.data.len() {
                     return Err(Trap {
                         origin: TrapOrigin::StoreOutOfMemory,
                     });
                 }
-
+                
                 // Fill memory
                 for i in 0..size {
                     mem.data[dest + i] = value;
                 }
-
+                
                 Ok(Continue)
             }
 

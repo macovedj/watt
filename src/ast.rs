@@ -147,13 +147,11 @@ pub enum Instr {
     IRel(types::Int, IRelOp),                      // integer numeric comparison
     FRel(types::Float, FRelOp),                    // floating numeric comparison
     Convert(ConvertOp),                            // conversion
-
-    // Reference types proposal instructions
-    RefNull,                                       // push null reference (0xd0)
-    RefIsNull,                                     // test if reference is null (0xd1)
-    RefFunc(Index),                                // get reference to function (0xd2)
-
-    // Bulk memory operations (0xfc prefix)
+    // Reference types proposal (partial support for decoding only)
+    RefNull,                                       // push null reference (0xc0)
+    RefIsNull,                                     // test if reference is null (0xc1)
+    RefFunc(Index),                                // get reference to function (0xc2)
+    // Bulk memory operations proposal (0xfc prefix)
     MemoryInit(Index),                             // copy from data segment to memory (0xfc 0x08)
     DataDrop(Index),                               // drop data segment (0xfc 0x09)
     MemoryCopy,                                    // copy memory region (0xfc 0x0a)

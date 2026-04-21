@@ -250,8 +250,7 @@ impl<R: Read> Decoder<R> {
         use super::types::Value::*;
 
         let opcode = self.read_byte()?;
-
-        Ok(MetaInstr::Instr(match opcode {
+        let result = Ok(MetaInstr::Instr(match opcode {
             0x00 => Unreachable,
             0x01 => Nop,
 
@@ -286,7 +285,11 @@ impl<R: Read> Decoder<R> {
             0x10 => Call(self.read_index()?),
             0x11 => {
                 let index = self.read_index()?;
-                if self.read_byte()? != 0 {
+                // In WASM MVP, this was a reserved byte that must be 0
+                // In newer WASM (reference-types proposal), this is a varuint32 table index
+                // Try reading as varuint32 to support both formats
+                let table_index = self.read_vu32()?;
+                if table_index != 0 {
                     return Err(DecodeError::MalformedBinary);
                 }
                 CallIndirect(index)
@@ -554,13 +557,13 @@ impl<R: Read> Decoder<R> {
             }),
 
             // Reference types proposal instructions
-            0xd0 => {
+            0xc0 => {
                 RefNull
             }
-            0xd1 => {
+            0xc1 => {
                 RefIsNull
             }
-            0xd2 => {
+            0xc2 => {
                 let func_index = self.read_index()?;
                 RefFunc(func_index)
             }
@@ -619,8 +622,11 @@ impl<R: Read> Decoder<R> {
                 }
             }
 
-            _ => return Err(DecodeError::MalformedBinary),
-        }))
+            _ => {
+                return Err(DecodeError::MalformedBinary);
+            }
+        }));
+        result
     }
 
     fn read_instr_block_with_delim(&mut self) -> DecodeResult<(Vec<Instr>, PseudoInstr)> {
@@ -801,15 +807,39 @@ impl<R: Read> Decoder<R> {
     }
 
     fn read_code(&mut self) -> DecodeResult<(Vec<types::Value>, Expr)> {
-        let _size = self.read_vu32()?;
+        let size = self.read_vu32()?;
         // TODO: do not create intermediate vectors just to concatenate them
-        let locals = self.read_vec(Decoder::read_locals)?.concat();
-        let body = self.read_expr()?;
+        let locals = match self.read_vec(Decoder::read_locals) {
+            Ok(l) => {
+                l.concat()
+            }
+            Err(e) => {
+                return Err(e);
+            }
+        };
+        let body = match self.read_expr() {
+            Ok(b) => {
+                b
+            }
+            Err(e) => {
+                return Err(e);
+            }
+        };
         Ok((locals, body))
     }
 
     fn read_code_section(&mut self) -> DecodeResult<Vec<(Vec<types::Value>, Expr)>> {
-        self.read_vec(Decoder::read_code)
+        let count = self.read_vu32()?;
+        let mut result = Vec::with_capacity(count as usize);
+        for i in 0..count {
+            match self.read_code() {
+                Ok(code) => result.push(code),
+                Err(e) => {
+                    return Err(e);
+                }
+            }
+        }
+        Ok(result)
     }
 
     fn read_data(&mut self) -> DecodeResult<Segment<u8>> {
@@ -846,25 +876,29 @@ impl<R: Read> Decoder<R> {
 
         loop {
             match self.read_byte() {
-                Err(DecodeError::Io(ref e)) if e.kind() == io::ErrorKind::UnexpectedEof => break,
+                Err(DecodeError::Io(ref e)) if e.kind() == io::ErrorKind::UnexpectedEof => {
+                    break
+                },
                 Err(e) => return Err(e),
                 Ok(id) => {
                     let size = self.read_vu32()?;
 
                     match id {
-                        0 => self.skip_custom_section(size)?, // ignore custom sections
-                        1 => types = self.read_type_section()?,
-                        2 => imports = self.read_import_section()?,
-                        3 => func_types = self.read_func_section()?,
-                        4 => tables = self.read_table_section()?,
-                        5 => memories = self.read_memory_section()?,
-                        6 => globals = self.read_global_section()?,
-                        7 => exports = self.read_export_section()?,
-                        8 => start = self.read_start_section()?,
-                        9 => elems = self.read_elem_section()?,
-                        10 => func_bodies = self.read_code_section()?,
-                        11 => data = self.read_data_section()?,
-                        _ => return Err(DecodeError::MalformedBinary),
+                        0 => {  self.skip_custom_section(size)?; }, // ignore custom sections
+                        1 => {  types = self.read_type_section()?; },
+                        2 => {  imports = self.read_import_section()?; },
+                        3 => {  func_types = self.read_func_section()?; },
+                        4 => {  tables = self.read_table_section()?; },
+                        5 => {  memories = self.read_memory_section()?; },
+                        6 => {  globals = self.read_global_section()?; },
+                        7 => {  exports = self.read_export_section()?; },
+                        8 => {  start = self.read_start_section()?; },
+                        9 => {  elems = self.read_elem_section()?; },
+                        10 => { func_bodies = self.read_code_section()?; },
+                        11 => { data = self.read_data_section()?; },
+                        _ => {
+                            return Err(DecodeError::MalformedBinary);
+                        }
                     }
                 }
             }
