@@ -9,7 +9,7 @@ features=wasi-preview1
 instructions=
 
 [filesystem]
-imports=wasi_snapshot_preview1::fd_close,wasi_snapshot_preview1::fd_fdstat_get,wasi_snapshot_preview1::fd_prestat_dir_name,wasi_snapshot_preview1::fd_prestat_get,wasi_snapshot_preview1::fd_read,wasi_snapshot_preview1::fd_readdir,wasi_snapshot_preview1::fd_seek,wasi_snapshot_preview1::fd_tell,wasi_snapshot_preview1::fd_write,wasi_snapshot_preview1::path_open
+imports=wasi_snapshot_preview1::fd_close,wasi_snapshot_preview1::fd_fdstat_get,wasi_snapshot_preview1::fd_fdstat_set_flags,wasi_snapshot_preview1::fd_prestat_dir_name,wasi_snapshot_preview1::fd_prestat_get,wasi_snapshot_preview1::fd_read,wasi_snapshot_preview1::fd_readdir,wasi_snapshot_preview1::fd_seek,wasi_snapshot_preview1::fd_tell,wasi_snapshot_preview1::fd_write,wasi_snapshot_preview1::path_open,wasi_snapshot_preview1::path_readlink
 features=wasi-preview1
 instructions=
 

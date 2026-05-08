@@ -389,6 +389,17 @@ fn wasi_fd_fdstat_get(interp: &mut crate::runtime::Interpreter<'_>) -> Option<St
     None
 }
 
+fn wasi_fd_fdstat_set_flags(interp: &mut crate::runtime::Interpreter<'_>) -> Option<String> {
+    let flags = pop_u32(interp)? as u16;
+    let fd = pop_u32(interp)?;
+    let errno = match wasi_ctx::fd_fdstat_set_flags(fd, flags) {
+        Ok(()) => wasi_ctx::ERRNO_SUCCESS,
+        Err(errno) => errno,
+    };
+    interp.push(Value::I32(errno as u32));
+    None
+}
+
 fn wasi_fd_filestat_get(interp: &mut crate::runtime::Interpreter<'_>) -> Option<String> {
     let stat_ptr = pop_u32(interp)? as usize;
     let fd = pop_u32(interp)?;
@@ -461,6 +472,43 @@ fn wasi_path_filestat_get(interp: &mut crate::runtime::Interpreter<'_>) -> Optio
     memory[stat_ptr + 40..stat_ptr + 48].copy_from_slice(&stat.atim.to_le_bytes());
     memory[stat_ptr + 48..stat_ptr + 56].copy_from_slice(&stat.mtim.to_le_bytes());
     memory[stat_ptr + 56..stat_ptr + 64].copy_from_slice(&stat.ctim.to_le_bytes());
+    interp.push(Value::I32(wasi_ctx::ERRNO_SUCCESS as u32));
+    None
+}
+
+fn wasi_path_readlink(interp: &mut crate::runtime::Interpreter<'_>) -> Option<String> {
+    let bufused_ptr = pop_u32(interp)? as usize;
+    let buf_len = pop_u32(interp)? as usize;
+    let buf_ptr = pop_u32(interp)? as usize;
+    let path_len = pop_u32(interp)? as usize;
+    let path_ptr = pop_u32(interp)? as usize;
+    let dirfd = pop_u32(interp)?;
+
+    let path_bytes = {
+        let memory = interp.get_memory_mut();
+        let end = path_ptr.saturating_add(path_len);
+        if end > memory.len() {
+            interp.push(Value::I32(wasi_ctx::ERRNO_FAULT as u32));
+            return None;
+        }
+        memory[path_ptr..end].to_vec()
+    };
+
+    let target = match wasi_ctx::path_readlink(dirfd, &path_bytes) {
+        Ok(v) => v,
+        Err(errno) => {
+            interp.push(Value::I32(errno as u32));
+            return None;
+        }
+    };
+    let copy_len = target.len().min(buf_len);
+    let memory = interp.get_memory_mut();
+    let buf_end = buf_ptr.saturating_add(copy_len);
+    if buf_end > memory.len() || !write_u32(memory, bufused_ptr, copy_len as u32) {
+        interp.push(Value::I32(wasi_ctx::ERRNO_FAULT as u32));
+        return None;
+    }
+    memory[buf_ptr..buf_end].copy_from_slice(&target[..copy_len]);
     interp.push(Value::I32(wasi_ctx::ERRNO_SUCCESS as u32));
     None
 }
@@ -667,6 +715,13 @@ pub fn host_func(name: &str, sig: &Func) -> Result<Option<HostFunc>, &'static st
                 Err("(i32, i32) -> (i32)")
             }
         }
+        "fd_fdstat_set_flags" => {
+            if signature_matches(sig, &[i32(), i32()], &[i32()]) {
+                Ok(Some(Box::new(wasi_fd_fdstat_set_flags)))
+            } else {
+                Err("(i32, i32) -> (i32)")
+            }
+        }
         "fd_filestat_get" => {
             if signature_matches(sig, &[i32(), i32()], &[i32()]) {
                 Ok(Some(Box::new(wasi_fd_filestat_get)))
@@ -700,6 +755,13 @@ pub fn host_func(name: &str, sig: &Func) -> Result<Option<HostFunc>, &'static st
                 Ok(Some(Box::new(wasi_path_filestat_get)))
             } else {
                 Err("(i32, i32, i32, i32, i32) -> (i32)")
+            }
+        }
+        "path_readlink" => {
+            if signature_matches(sig, &[i32(), i32(), i32(), i32(), i32(), i32()], &[i32()]) {
+                Ok(Some(Box::new(wasi_path_readlink)))
+            } else {
+                Err("(i32, i32, i32, i32, i32, i32) -> (i32)")
             }
         }
         "fd_prestat_get" => {
@@ -775,12 +837,17 @@ mod tests {
     fn exposes_expected_proc_macro_subset() {
         let sig = Func { args: vec![i32(), i32()], result: vec![i32()] };
         let path_sig = Func { args: vec![i32(), i32(), i32(), i32(), i32()], result: vec![i32()] };
-        let readdir_sig = Func { args: vec![i32(), i32(), i32(), super::i64(), i32()], result: vec![i32()] };
+        let readlink_sig =
+            Func { args: vec![i32(), i32(), i32(), i32(), i32(), i32()], result: vec![i32()] };
+        let readdir_sig =
+            Func { args: vec![i32(), i32(), i32(), super::i64(), i32()], result: vec![i32()] };
         assert!(host_func("environ_sizes_get", &sig).unwrap().is_some());
         assert!(host_func("environ_get", &sig).unwrap().is_some());
         assert!(host_func("args_get", &sig).unwrap().is_some());
+        assert!(host_func("fd_fdstat_set_flags", &sig).unwrap().is_some());
         assert!(host_func("fd_filestat_get", &sig).unwrap().is_some());
         assert!(host_func("path_filestat_get", &path_sig).unwrap().is_some());
+        assert!(host_func("path_readlink", &readlink_sig).unwrap().is_some());
         assert!(host_func("fd_readdir", &readdir_sig).unwrap().is_some());
         assert!(host_func("not_supported", &sig).unwrap().is_none());
     }

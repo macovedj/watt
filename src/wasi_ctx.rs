@@ -672,7 +672,19 @@ pub(crate) fn fd_filestat(fd: u32) -> Result<Filestat, i32> {
     })
 }
 
-pub(crate) fn path_filestat(dirfd: u32, lookupflags: u32, rel_path: &[u8]) -> Result<Filestat, i32> {
+pub(crate) fn fd_fdstat_set_flags(fd: u32, _flags: u16) -> Result<(), i32> {
+    CTX.with(|ctx| {
+        let ctx = ctx.borrow();
+        ctx.fd_entry(fd).ok_or(ERRNO_BADF)?;
+        Ok(())
+    })
+}
+
+pub(crate) fn path_filestat(
+    dirfd: u32,
+    lookupflags: u32,
+    rel_path: &[u8],
+) -> Result<Filestat, i32> {
     let rel = std::str::from_utf8(rel_path).map_err(|_| ERRNO_INVAL)?;
     let rel_path = Path::new(rel);
     let follow_symlink = (lookupflags & 1) != 0;
@@ -690,6 +702,20 @@ pub(crate) fn path_filestat(dirfd: u32, lookupflags: u32, rel_path: &[u8]) -> Re
         .map_err(|err| io_error_to_errno(&err))?;
 
         Ok(metadata_to_filestat(&meta))
+    })
+}
+
+pub(crate) fn path_readlink(dirfd: u32, rel_path: &[u8]) -> Result<Vec<u8>, i32> {
+    let rel = std::str::from_utf8(rel_path).map_err(|_| ERRNO_INVAL)?;
+    let rel_path = Path::new(rel);
+
+    CTX.with(|ctx| {
+        let ctx = ctx.borrow();
+        let entry = ctx.fd_entry(dirfd).ok_or(ERRNO_BADF)?;
+        let (root, _) = dir_root_from_entry(entry)?;
+        let full = resolve_existing_in_preopen(&root, rel_path, false)?;
+        let target = std::fs::read_link(&full).map_err(|err| io_error_to_errno(&err))?;
+        Ok(target.to_string_lossy().as_bytes().to_vec())
     })
 }
 
@@ -1129,6 +1155,26 @@ mod tests {
         let stat = path_filestat(3, 1, b"meta.txt").unwrap();
         assert_eq!(stat.filetype, FILETYPE_REGULAR_FILE);
         assert_eq!(stat.size, 5);
+    }
+
+    #[test]
+    fn fd_fdstat_set_flags_accepts_known_fd() {
+        let dir = mk_tmp_dir();
+        set_for_test_with_preopens(Vec::new(), false, vec![(dir.clone(), false)]);
+
+        assert!(fd_fdstat_set_flags(3, 0).is_ok());
+        assert_eq!(fd_fdstat_set_flags(99, 0).unwrap_err(), ERRNO_BADF);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn path_readlink_reads_relative_symlink_target() {
+        let dir = mk_tmp_dir();
+        std::fs::write(dir.join("target.wit"), b"package test:target;").unwrap();
+        symlink("target.wit", dir.join("link.wit")).unwrap();
+        set_for_test_with_preopens(Vec::new(), false, vec![(dir.clone(), false)]);
+
+        assert_eq!(path_readlink(3, b"link.wit").unwrap(), b"target.wit");
     }
 
     #[test]
